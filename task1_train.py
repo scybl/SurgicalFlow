@@ -7,7 +7,6 @@ from torchvision import transforms
 from tqdm import tqdm
 import random
 import logging
-from torch.utils.data import random_split
 
 from task1_data import Cholec80RemainingFramesDataset
 from models.cnn import Task1CNN
@@ -109,25 +108,24 @@ def build_model(model_name):
 def validate(model, loader, device):
 
     model.eval()
-
     mae_sum = 0.0
     count = 0
 
     with torch.no_grad():
-
-        for frames, remain_norm, _, _ in tqdm(loader, desc="Valid", leave=True):
+        for frames, remain_sec, _ in tqdm(loader, desc="Valid", leave=False):
 
             frames = frames.to(device)
-            remain_norm = remain_norm.to(device)
+            remain_sec = remain_sec.to(device)
 
+            # CNN baseline uses last frame
             x = frames[:, -1]
 
-            pred_norm = model(x)
+            pred_sec = model(x)
 
-            mae_sum += torch.abs(pred_norm - remain_norm).sum().item()
-            count += remain_norm.size(0)
+            mae_sum += torch.abs(pred_sec - remain_sec).sum().item()
+            count += remain_sec.size(0)
 
-    return mae_sum / count
+    return mae_sum / count   # MAE in seconds
 
 # Main training
 def main():
@@ -234,17 +232,17 @@ def main():
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}")
 
-        for frames, remain_norm, _, _ in pbar:
+        for frames, remain_sec, _ in pbar:
 
             frames = frames.to(device)
-            remain_norm = remain_norm.to(device)
+            remain_sec = remain_sec.to(device)
 
             # CNN baseline uses last frame
             x = frames[:, -1]
 
-            pred = model(x)
+            pred = model(x)          # seconds
 
-            loss = criterion(pred, remain_norm)
+            loss = criterion(pred, remain_sec)
 
             optimizer.zero_grad()
             loss.backward()
@@ -252,19 +250,21 @@ def main():
 
             running_loss += loss.item()
 
-            pbar.set_postfix(loss=f"{loss.item():.4f}")
+            pbar.set_postfix(loss=f"{loss.item():.2f}s")
 
         avg_loss = running_loss / len(train_loader)
         train_loss_history.append(avg_loss)
 
-        logger.info(f"Epoch {epoch+1} Train Loss: {avg_loss:.4f}")
+        logger.info(
+            f"Epoch {epoch+1} Train SmoothL1 Loss (sec): {avg_loss:.2f}"
+        )
 
         # ---------------- Validation ----------------
 
         val_mae = validate(model, val_loader, device)
         val_mae_history.append(val_mae)
 
-        logger.info(f"Epoch {epoch+1} Validation MAE (norm): {val_mae:.4f}")
+        logger.info(f"Epoch {epoch+1} Validation MAE (sec): {val_mae:.2f}")
 
         # ---------------- Save Best ----------------
 
@@ -292,7 +292,7 @@ def main():
 
     plt.figure(figsize=(8, 5))
 
-    plt.plot(train_loss_history, label="Train SmoothL1 Loss")
+    plt.plot(train_loss_history, label="Train SmoothL1 Loss (sec)")
     plt.plot(val_mae_history, label="Val MAE (sec)")
 
     plt.xlabel("Epoch")

@@ -5,12 +5,12 @@ import torch.nn.functional as F
 
 class Task1CNN(nn.Module):
     """
-    CNN baseline for Remaining Time Prediction (Task 1)
+    CNN baseline for Remaining Time Prediction (Task A)
 
     Input:
         x: [B, 3, H, W]
     Output:
-        y: [B]  (normalized remaining time)
+        y: [B]  (remaining time in seconds)
     """
 
     def __init__(self):

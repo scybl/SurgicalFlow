@@ -31,7 +31,6 @@ class Cholec80RemainingFramesDataset(Dataset):
 
     返回：
       frames: [T, C, H, W] float32 in [0,1]
-      remaining_time_norm: float32 scalar
       remaining_time_sec: float32 scalar (基于抽帧后的“有效秒”)
       phase_id: int64 scalar
     """
@@ -44,7 +43,6 @@ class Cholec80RemainingFramesDataset(Dataset):
         stride=8,
         transform=None,
         video_list=None,
-        normalize=True,
         sample_every=25,          # 每隔多少“原始帧”保留一帧；你这里是 25
         frames_dirname="frames",  # 你的新目录名
         phase_dirname="phase_annotations",
@@ -57,7 +55,6 @@ class Cholec80RemainingFramesDataset(Dataset):
         self.seq_len = seq_len
         self.stride = stride
         self.transform = transform
-        self.normalize = normalize
         self.sample_every = sample_every
         self.fps_eff = FPS_ORI / float(sample_every)  # 抽帧后的有效fps；25/25=1fps
 
@@ -85,20 +82,31 @@ class Cholec80RemainingFramesDataset(Dataset):
         return frames, phases
 
     def _compute_remaining_time(self, phases, fps):
-        # TODO: 这个要改
-        # phases: list[int], 每个“抽帧点”的phase id
-        remaining_sec = [0.0] * len(phases)
+        """
+        Task A (strict, minimal interpretation):
+
+        remaining_time[t] =
+            time until the end of the CURRENT surgical phase
+
+        phases: list[int]  # sampled phase id sequence
+        fps: effective fps after sampling
+        """
+
+        n = len(phases)
+        remaining_sec = [0.0] * n
+
         phase_start = 0
-        for i in range(1, len(phases)):
+        for i in range(1, n):
             if phases[i] != phases[i - 1]:
                 phase_end = i - 1
-                for j in range(phase_start, phase_end + 1):
-                    remaining_sec[j] = (phase_end - j) / fps
+                for t in range(phase_start, phase_end + 1):
+                    remaining_sec[t] = (phase_end - t) / fps
                 phase_start = i
 
-        phase_end = len(phases) - 1
-        for j in range(phase_start, phase_end + 1):
-            remaining_sec[j] = (phase_end - j) / fps
+        # last phase
+        phase_end = n - 1
+        for t in range(phase_start, phase_end + 1):
+            remaining_sec[t] = (phase_end - t) / fps
 
         return remaining_sec
 
@@ -175,19 +183,15 @@ class Cholec80RemainingFramesDataset(Dataset):
             remaining_sec = self._compute_remaining_time(
                 phases_sampled, fps=self.fps_eff
             )
-            max_phase_time = max(remaining_sec) + 1e-6
 
             for start in range(0, usable_len - self.seq_len, self.stride):
                 end_idx = start + self.seq_len - 1
 
-                remain_s = remaining_sec[end_idx]
-                remain_norm = (
-                    remain_s / max_phase_time if self.normalize else remain_s
-                )
+                remain_s = remaining_sec[end_idx]   # 单位：秒
                 phase_id = phases_sampled[end_idx]
 
                 self.samples.append(
-                    (frame_paths, start, remain_norm, remain_s, phase_id)
+                    (frame_paths, start, remain_s, phase_id)
                 )
 
         print(f"[{self.mode}] total samples: {len(self.samples)}")
@@ -221,13 +225,12 @@ class Cholec80RemainingFramesDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        frame_paths, start, remain_norm, remain_sec, phase_id = self.samples[idx]
+        frame_paths, start, remain_sec, phase_id = self.samples[idx]
+
         frames = self._read_clip_from_paths(frame_paths, start)
 
-
         return (
-            frames,
-            torch.tensor(remain_norm, dtype=torch.float32),
-            torch.tensor(remain_sec, dtype=torch.float32),
+            frames,                                   # [T,3,H,W]
+            torch.tensor(remain_sec, dtype=torch.float32),  # 秒
             torch.tensor(phase_id, dtype=torch.long),
         )
