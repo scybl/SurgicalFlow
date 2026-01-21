@@ -66,6 +66,7 @@ class Cholec80RemainingFramesDataset(Dataset):
         
         self.mode = mode  # "train", "test"
         self._build_index(video_list)
+    
 
     def _load_phase_file(self, path):
         frames = []

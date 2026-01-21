@@ -169,140 +169,131 @@ def main():
 
     # ---------------- Dataset ----------------
 
-    full_dataset = Cholec80RemainingFramesDataset(
+    train_dataset,val_dataset = Cholec80RemainingFramesDataset(
         root_dir=args.data_root,
         seq_len=args.seq_len,
+        mode="train",
         stride=args.stride,
         transform=transform
     )
 
-    dataset_size = len(full_dataset)
-
-    train_size = int(0.7 * dataset_size)
-    val_size = int(0.2 * dataset_size)
-    test_size = dataset_size - train_size - val_size
-
-    train_set, val_set, test_set = random_split(
-        full_dataset,
-        [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(args.seed)
-    )
-
-    train_loader = DataLoader(
-        train_set,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=(device.type == "cuda")
-    )
-
-    val_loader = DataLoader(
-        val_set,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=(device.type == "cuda")
-    )
-
-    # ---------------- Model ----------------
-
-    model = build_model(args.model).to(device)
-
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=args.lr
-    )
-
-    criterion = nn.SmoothL1Loss()
-
-    best_mae = float("inf")
-    train_loss_history = []
-    val_mae_history = []
 
 
-    # ---------------- Training Loop ----------------
+    # train_loader = DataLoader(
+    #     train_set,
+    #     batch_size=args.batch_size,
+    #     shuffle=True,
+    #     num_workers=args.num_workers,
+    #     pin_memory=(device.type == "cuda")
+    # )
 
-    for epoch in range(args.epochs):
+    # val_loader = DataLoader(
+    #     val_set,
+    #     batch_size=args.batch_size,
+    #     shuffle=False,
+    #     num_workers=args.num_workers,
+    #     pin_memory=(device.type == "cuda")
+    # )
 
-        model.train()
+    # # ---------------- Model ----------------
 
-        running_loss = 0.0
+    # model = build_model(args.model).to(device)
 
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}")
+    # optimizer = torch.optim.Adam(
+    #     model.parameters(),
+    #     lr=args.lr
+    # )
 
-        for frames, remain_norm, _, _ in pbar:
+    # criterion = nn.SmoothL1Loss()
 
-            frames = frames.to(device)
-            remain_norm = remain_norm.to(device)
-
-            # CNN baseline uses last frame
-            x = frames[:, -1]
-
-            pred = model(x)
-
-            loss = criterion(pred, remain_norm)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-
-            pbar.set_postfix(loss=f"{loss.item():.4f}")
-
-        avg_loss = running_loss / len(train_loader)
-        train_loss_history.append(avg_loss)
-
-        logger.info(f"Epoch {epoch+1} Train Loss: {avg_loss:.4f}")
-
-        # ---------------- Validation ----------------
-
-        val_mae = validate(model, val_loader, device)
-        val_mae_history.append(val_mae)
-
-        logger.info(f"Epoch {epoch+1} Validation MAE (norm): {val_mae:.4f}")
-
-        # ---------------- Save Best ----------------
-
-        if val_mae < best_mae:
-
-            best_mae = val_mae
-
-            torch.save({
-                "epoch": epoch + 1,
-                "model": "Task1CNNBaseline",
-                "model_state": model.state_dict(),
-                "optimizer_state": optimizer.state_dict(),
-                "best_mae": best_mae,
-                "args": vars(args)
-            }, best_ckpt_path)
-
-            logger.info("Saved best checkpoint → %s", best_ckpt_path)
-            logger.info("Best Validation MAE: %.2f", best_mae)
+    # best_mae = float("inf")
+    # train_loss_history = []
+    # val_mae_history = []
 
 
-    logger.info("\nTraining finished.")
-    logger.info("Best Validation MAE: %.2f", best_mae)
+    # # ---------------- Training Loop ----------------
 
-    # ---------------- Plot Loss Curve ----------------
+    # for epoch in range(args.epochs):
 
-    plt.figure(figsize=(8, 5))
+    #     model.train()
 
-    plt.plot(train_loss_history, label="Train SmoothL1 Loss")
-    plt.plot(val_mae_history, label="Val MAE (sec)")
+    #     running_loss = 0.0
 
-    plt.xlabel("Epoch")
-    plt.ylabel("Value")
-    plt.title("Task1 Training Curve")
+    #     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}")
 
-    plt.legend()
-    plt.grid(True)
+    #     for frames, remain_norm, _, _ in pbar:
 
-    plot_path = os.path.join(exp_dir, "training_curve.png")
-    plt.savefig(plot_path, dpi=150, bbox_inches="tight")
-    plt.close()
+    #         frames = frames.to(device)
+    #         remain_norm = remain_norm.to(device)
 
-    logger.info(f"Training curve saved to: {plot_path}")
+    #         # CNN baseline uses last frame
+    #         x = frames[:, -1]
+
+    #         pred = model(x)
+
+    #         loss = criterion(pred, remain_norm)
+
+    #         optimizer.zero_grad()
+    #         loss.backward()
+    #         optimizer.step()
+
+    #         running_loss += loss.item()
+
+    #         pbar.set_postfix(loss=f"{loss.item():.4f}")
+
+    #     avg_loss = running_loss / len(train_loader)
+    #     train_loss_history.append(avg_loss)
+
+    #     logger.info(f"Epoch {epoch+1} Train Loss: {avg_loss:.4f}")
+
+    #     # ---------------- Validation ----------------
+
+    #     val_mae = validate(model, val_loader, device)
+    #     val_mae_history.append(val_mae)
+
+    #     logger.info(f"Epoch {epoch+1} Validation MAE (norm): {val_mae:.4f}")
+
+    #     # ---------------- Save Best ----------------
+
+    #     if val_mae < best_mae:
+
+    #         best_mae = val_mae
+
+    #         torch.save({
+    #             "epoch": epoch + 1,
+    #             "model": "Task1CNNBaseline",
+    #             "model_state": model.state_dict(),
+    #             "optimizer_state": optimizer.state_dict(),
+    #             "best_mae": best_mae,
+    #             "args": vars(args)
+    #         }, best_ckpt_path)
+
+    #         logger.info("Saved best checkpoint → %s", best_ckpt_path)
+    #         logger.info("Best Validation MAE: %.2f", best_mae)
+
+
+    # logger.info("\nTraining finished.")
+    # logger.info("Best Validation MAE: %.2f", best_mae)
+
+    # # ---------------- Plot Loss Curve ----------------
+
+    # plt.figure(figsize=(8, 5))
+
+    # plt.plot(train_loss_history, label="Train SmoothL1 Loss")
+    # plt.plot(val_mae_history, label="Val MAE (sec)")
+
+    # plt.xlabel("Epoch")
+    # plt.ylabel("Value")
+    # plt.title("Task1 Training Curve")
+
+    # plt.legend()
+    # plt.grid(True)
+
+    # plot_path = os.path.join(exp_dir, "training_curve.png")
+    # plt.savefig(plot_path, dpi=150, bbox_inches="tight")
+    # plt.close()
+
+    # logger.info(f"Training curve saved to: {plot_path}")
 
 
 
