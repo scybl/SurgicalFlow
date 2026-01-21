@@ -138,7 +138,9 @@ class Cholec80RemainingFramesDataset(Dataset):
 
         # ---- step 2: fixed split by mode (NO randomness) ----
         if self.mode == "train":
-            used_videos = all_videos[:50]
+            used_videos = all_videos[:40]
+        elif self.mode == "val":
+            used_videos = all_videos[40:50]
         elif self.mode == "test":
             used_videos = all_videos[50:80]
         else:
