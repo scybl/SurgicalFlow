@@ -9,7 +9,7 @@ import random
 import logging
 
 from task1_data import Cholec80RemainingFramesDataset
-from models.cnn import Task1CNN
+from model import Task1CNN
 import numpy as np
 import matplotlib.pyplot as plt
 import json
