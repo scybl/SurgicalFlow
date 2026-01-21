@@ -117,10 +117,7 @@ def validate(model, loader, device):
             frames = frames.to(device)
             remain_sec = remain_sec.to(device)
 
-            # CNN baseline uses last frame
-            x = frames[:, -1]
-
-            pred_sec = model(x)
+            pred_sec = model(frames)
 
             mae_sum += torch.abs(pred_sec - remain_sec).sum().item()
             count += remain_sec.size(0)
@@ -232,24 +229,28 @@ def main():
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}")
 
-        for frames, remain_sec, _ in pbar:
+        for i, (frames, remain_sec, _) in enumerate(pbar):
 
-            frames = frames.to(device)
-            remain_sec = remain_sec.to(device)
+                frames = frames.to(device)
+                remain_sec = remain_sec.to(device)
 
-            # CNN baseline uses last frame
+                # 🔍 只在第一个 epoch 的第一个 batch 打印一次
+                if epoch == 0 and i == 0:
+                    print("GT min:", remain_sec.min().item())
+                    print("GT max:", remain_sec.max().item())
+                    print("GT mean:", remain_sec.mean().item())
 
-            pred = model(frames)          # seconds
+                pred = model(frames)          # seconds
 
-            loss = criterion(pred, remain_sec)
+                loss = criterion(pred, remain_sec)
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-            running_loss += loss.item()
+                running_loss += loss.item()
 
-            pbar.set_postfix(loss=f"{loss.item():.2f}s")
+                pbar.set_postfix(loss=f"{loss.item():.2f}s")
 
         avg_loss = running_loss / len(train_loader)
         train_loss_history.append(avg_loss)
