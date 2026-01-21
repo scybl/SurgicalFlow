@@ -1,8 +1,9 @@
 import os
 import re
-import cv2
 import torch
 from torch.utils.data import Dataset
+import numpy as np
+from PIL import Image
 
 FPS_ORI = 25.0  # 原视频fps（Cholec80）
 PHASE2ID = {
@@ -137,9 +138,9 @@ class Cholec80RemainingFramesDataset(Dataset):
 
         # ---- step 2: fixed split by mode (NO randomness) ----
         if self.mode == "train":
-            used_videos = all_videos[:40]
+            used_videos = all_videos[:50]
         elif self.mode == "test":
-            used_videos = all_videos[40:50]
+            used_videos = all_videos[50:80]
         else:
             raise ValueError(f"Unknown mode: {self.mode}")
 
@@ -189,21 +190,28 @@ class Cholec80RemainingFramesDataset(Dataset):
 
         print(f"[{self.mode}] total samples: {len(self.samples)}")
 
+
     def _read_clip_from_paths(self, frame_paths, start_idx):
         paths = frame_paths[start_idx:start_idx + self.seq_len]
         frames = []
+
         for p in paths:
-            img = cv2.imread(p, cv2.IMREAD_COLOR)
-            if img is None:
+            try:
+                img = Image.open(p).convert("RGB")
+            except Exception:
                 raise FileNotFoundError(f"Failed to read image: {p}")
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
             if self.transform:
-                # ensure CHW float tensor in [0,1]
-                img_t = torch.from_numpy(img).permute(2, 0, 1).contiguous().float() / 255.0
-                img = self.transform(img_t)
+                # torchvision transform usually expects PIL Image
+                img = self.transform(img)
             else:
-                img = torch.from_numpy(img).permute(2, 0, 1).contiguous().float() / 255.0
+                # manually convert to tensor [C,H,W] in [0,1]
+                img = torch.from_numpy(
+                    np.array(img, dtype=np.float32)
+                ).permute(2, 0, 1) / 255.0
+
             frames.append(img)
+
         return torch.stack(frames, dim=0)
 
 
