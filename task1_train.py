@@ -169,13 +169,14 @@ def main():
 
     # ---------------- Dataset ----------------
 
-    train_dataset,val_dataset = Cholec80RemainingFramesDataset(
+    full_trainval_dataset = Cholec80RemainingFramesDataset(
         root_dir=args.data_root,
-        seq_len=args.seq_len,
         mode="train",
+        seq_len=args.seq_len,
         stride=args.stride,
-        transform=transform
+        transform=transform,
     )
+
 
 
 
