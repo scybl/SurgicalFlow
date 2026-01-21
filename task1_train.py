@@ -24,7 +24,7 @@ def parse_args():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--data_root", type=str,required=True)
+    parser.add_argument("--data_root", type=str,default="data/cholec80")
     parser.add_argument("--name", type=str,required=True)
     parser.add_argument("--model", type=str, required=True, choices=["cnn", "cnn_lstm"])
     parser.add_argument("--epochs", type=int,required=True)
@@ -35,7 +35,7 @@ def parse_args():
     parser.add_argument("--seq_len", type=int, default=16)
     parser.add_argument("--stride", type=int, default=8)
 
-    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--save_dir", type=str, default="checkpoints")
 
     parser.add_argument("--device", type=str, default="cuda")
