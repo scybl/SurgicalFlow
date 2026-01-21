@@ -238,9 +238,8 @@ def main():
             remain_sec = remain_sec.to(device)
 
             # CNN baseline uses last frame
-            x = frames[:, -1]
 
-            pred = model(x)          # seconds
+            pred = model(frames)          # seconds
 
             loss = criterion(pred, remain_sec)
 
@@ -307,8 +306,6 @@ def main():
     plt.close()
 
     logger.info(f"Training curve saved to: {plot_path}")
-
-
 
 
 if __name__ == "__main__":

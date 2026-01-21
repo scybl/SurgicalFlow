@@ -5,10 +5,10 @@ import torch.nn.functional as F
 
 class Task1CNN(nn.Module):
     """
-    CNN baseline for Remaining Time Prediction (Task A)
+    Temporal CNN baseline for Remaining Time Prediction (Task A)
 
     Input:
-        x: [B, 3, H, W]
+        x: [B, T, 3, H, W]
     Output:
         y: [B]  (remaining time in seconds)
     """
@@ -17,7 +17,6 @@ class Task1CNN(nn.Module):
         super().__init__()
 
         # ---------------- Feature extractor ----------------
-
         self.backbone = nn.Sequential(
 
             # Block 1
@@ -45,28 +44,33 @@ class Task1CNN(nn.Module):
             nn.MaxPool2d(2),   # H/16
         )
 
-        # Global pooling
         self.gap = nn.AdaptiveAvgPool2d((1, 1))
 
         # ---------------- Regression head ----------------
-
         self.regressor = nn.Sequential(
             nn.Linear(256, 128),
             nn.ReLU(inplace=True),
             nn.Dropout(0.3),
-
             nn.Linear(128, 1)
         )
 
     def forward(self, x):
+        """
+        x: [B, T, 3, H, W]
+        """
 
-        # x: [B,3,H,W]
+        B, T, C, H, W = x.shape
 
-        feat = self.backbone(x)
+        # ---- process all frames with shared CNN ----
+        x = x.view(B * T, C, H, W)              # [B*T,3,H,W]
+        feat = self.backbone(x)                 # [B*T,256,h,w]
+        feat = self.gap(feat)                   # [B*T,256,1,1]
+        feat = feat.view(B, T, -1)              # [B,T,256]
 
-        feat = self.gap(feat)            # [B,256,1,1]
-        feat = feat.view(feat.size(0), -1)
+        # ---- temporal aggregation (baseline choice) ----
+        feat = feat.mean(dim=1)                 # [B,256]
 
-        out = self.regressor(feat)       # [B,1]
+        # ---- regression ----
+        out = self.regressor(feat)              # [B,1]
 
         return out.squeeze(1)
