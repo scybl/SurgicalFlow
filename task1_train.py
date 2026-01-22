@@ -9,7 +9,7 @@ import random
 import logging
 
 from task1_data import Cholec80RemainingFramesDataset
-from model import Task1CNN
+from models import Task1CNN
 import numpy as np
 import matplotlib.pyplot as plt
 import json
@@ -23,12 +23,12 @@ def parse_args():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--data_root", type=str,default="data/cholec80")
     parser.add_argument("--name", type=str,required=True)
-    parser.add_argument("--model", type=str, required=True, choices=["cnn", "cnn_lstm"])
     parser.add_argument("--epochs", type=int,required=True)
+    parser.add_argument("--model", type=str, required=True, choices=["cnn", "cnn_lstm"])
 
-    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--data_root", type=str,default="data/cholec80")
+    parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=1e-4)
 
     parser.add_argument("--seq_len", type=int, default=16)
