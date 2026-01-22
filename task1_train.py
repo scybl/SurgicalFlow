@@ -9,7 +9,7 @@ import random
 import logging
 
 from task1_data import Cholec80RemainingFramesDataset
-from models import Task1CNN
+from models import Task1CNN, Task1CNNLSTM
 import numpy as np
 import matplotlib.pyplot as plt
 import json
@@ -98,8 +98,7 @@ def build_model(model_name):
         return Task1CNN()
 
     elif model_name == "cnn_lstm":
-        raise NotImplementedError("cnn_lstm not implemented yet")
-
+        return Task1CNNLSTM()
     else:
         raise ValueError("Unknown model type")
 
