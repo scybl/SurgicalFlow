@@ -9,7 +9,9 @@ import random
 import logging
 
 from task1_data import Cholec80RemainingFramesDataset
-from models import Task1CNN, Task1CNNLSTM
+from models import TaskA_CNN, TaskA_CNN_LSTM
+
+
 import numpy as np
 import matplotlib.pyplot as plt
 import json
@@ -92,15 +94,14 @@ def setup_logger(log_dir):
 
     return logger
 
+
 def build_model(model_name):
 
     if model_name == "cnn":
-        return Task1CNN()
+        return TaskA_CNN()
 
     elif model_name == "cnn_lstm":
-        return Task1CNNLSTM()
-    else:
-        raise ValueError("Unknown model type")
+        return TaskA_CNN_LSTM()
 
 
 # Validation function
@@ -111,7 +112,7 @@ def validate(model, loader, device):
     count = 0
 
     with torch.no_grad():
-        for frames, remain_sec, _ in tqdm(loader, desc="Valid", leave=False):
+        for frames, remain_sec, future_start, future_end, future_phase, future_mask in tqdm(loader, desc="Valid", leave=False):
 
             frames = frames.to(device)
             remain_sec = remain_sec.to(device)
@@ -126,18 +127,21 @@ def validate(model, loader, device):
 # Main training
 def main():
 
-    args = parse_args()
+    # ---------------- Parse args ----------------
 
+    args = parse_args()
     set_seed(args.seed)
+
     print("Random seed:", args.seed)
 
-    # ---------------- Paths ----------------
+    # ---------------- Experiment folder ----------------
 
     exp_dir = os.path.join("checkpoints", args.name)
     os.makedirs(exp_dir, exist_ok=True)
+
     logger = setup_logger(exp_dir)
-    config_path = os.path.join(exp_dir, "config.json")
-    save_config(args, config_path)
+
+    save_config(args, os.path.join(exp_dir, "config.json"))
 
     best_ckpt_path = os.path.join(exp_dir, "best.pth")
 
@@ -148,10 +152,10 @@ def main():
     )
 
     logger.info(f"Experiment: {args.name}")
-    logger.info(f"Saving to: {exp_dir}")
-    logger.info(f"Using device: {device}")
-    logger.info(f"Seed: {args.seed}")
+    logger.info(f"Device: {device}")
     logger.info(f"Model: {args.model}")
+    logger.info(f"Epochs: {args.epochs}")
+    logger.info(f"Batch size: {args.batch_size}")
 
     # ---------------- Transform ----------------
 
@@ -168,7 +172,7 @@ def main():
 
     train_dataset = Cholec80RemainingFramesDataset(
         root_dir=args.data_root,
-        mode="train",          # video 1–40
+        mode="train",
         seq_len=args.seq_len,
         stride=args.stride,
         transform=transform,
@@ -176,33 +180,35 @@ def main():
 
     val_dataset = Cholec80RemainingFramesDataset(
         root_dir=args.data_root,
-        mode="val",            # video 41–50
+        mode="val",
         seq_len=args.seq_len,
         stride=args.stride,
         transform=transform,
     )
 
-    # -------------------------
-    # DataLoader
-    # -------------------------
+    # ---------------- DataLoader ----------------
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
-        shuffle=True,          # 训练集可以 shuffle（sample-level）
+        shuffle=True,
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
-        drop_last=True,        # 可选，训练时通常开
+        drop_last=True
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
-        shuffle=False,         # 验证集绝对不要 shuffle
+        shuffle=False,
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
     )
 
-    # ---------------- Model ----------------
+    logger.info(f"Train samples: {len(train_dataset)}")
+    logger.info(f"Val samples: {len(val_dataset)}")
+
+    # ---------------- Build Model ----------------
 
     model = build_model(args.model).to(device)
 
@@ -211,14 +217,25 @@ def main():
         lr=args.lr
     )
 
-    criterion = nn.SmoothL1Loss()
+    # ---------- Loss functions ----------
+
+    criterion_remain = nn.SmoothL1Loss()
+    criterion_phase = nn.CrossEntropyLoss(reduction="none")
+
+    # Loss weights (can report as hyper-parameters)
+    lambda_remain = 1.0
+    lambda_future = 0.5
+    lambda_phase = 0.2
 
     best_mae = float("inf")
-    train_loss_history = []
-    val_mae_history = []
 
+    train_loss_curve = []
+    val_mae_curve = []
+    val_r2_curve = []
 
-    # ---------------- Training Loop ----------------
+    # ==========================================================
+    #                      Training Loop
+    # ==========================================================
 
     for epoch in range(args.epochs):
 
@@ -228,44 +245,123 @@ def main():
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}")
 
-        for i, (frames, remain_sec, _) in enumerate(pbar):
+        for step, batch in enumerate(pbar):
 
-                frames = frames.to(device)
-                remain_sec = remain_sec.to(device)
+            (
+                frames,
+                remain_sec,
+                future_start,
+                future_end,
+                future_phase,
+                future_mask
+            ) = batch
 
-                # 🔍 只在第一个 epoch 的第一个 batch 打印一次
-                if epoch == 0 and i == 0:
-                    print("GT min:", remain_sec.min().item())
-                    print("GT max:", remain_sec.max().item())
-                    print("GT mean:", remain_sec.mean().item())
+            # -------- Move to GPU --------
 
-                pred = model(frames)          # seconds
+            frames = frames.to(device)
+            remain_sec = remain_sec.to(device)
 
-                loss = criterion(pred, remain_sec)
+            future_start = future_start.to(device)
+            future_end   = future_end.to(device)
+            future_phase = future_phase.to(device)
+            future_mask  = future_mask.to(device)
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+            # -------- Debug once --------
 
-                running_loss += loss.item()
+            if epoch == 0 and step == 0:
+                logger.info(
+                    f"Remain GT range: "
+                    f"{remain_sec.min():.1f}s - {remain_sec.max():.1f}s"
+                )
 
-                pbar.set_postfix(loss=f"{loss.item():.2f}s")
+            # -------- Forward --------
 
-        avg_loss = running_loss / len(train_loader)
-        train_loss_history.append(avg_loss)
+            pred_remain, pred_fstart, pred_fend, pred_phase_logits = model(frames)
+
+            # ==================================================
+            #                  Loss computation
+            # ==================================================
+
+            # ---- Remaining time regression ----
+
+            loss_remain = criterion_remain(
+                pred_remain,
+                remain_sec
+            )
+
+            # ---- Future timeline loss (masked L1) ----
+
+            time_error = torch.abs(pred_fstart - future_start) \
+                       + torch.abs(pred_fend - future_end)
+
+            loss_future = (
+                time_error * future_mask
+            ).sum() / (future_mask.sum() + 1e-6)
+
+            # ---- Phase classification loss (masked CE) ----
+
+            B, N, K = pred_phase_logits.shape
+
+            logits_flat = pred_phase_logits.view(B * N, K)
+            phase_gt_flat = future_phase.view(B * N)
+            mask_flat = future_mask.view(B * N)
+
+            phase_loss_all = criterion_phase(
+                logits_flat,
+                phase_gt_flat
+            )
+
+            loss_phase = (
+                phase_loss_all * mask_flat
+            ).sum() / (mask_flat.sum() + 1e-6)
+
+            # ---- Total loss ----
+
+            total_loss = (
+                lambda_remain * loss_remain +
+                lambda_future * loss_future +
+                lambda_phase * loss_phase
+            )
+
+            # ==================================================
+            #                 Backprop
+            # ==================================================
+
+            optimizer.zero_grad()
+            total_loss.backward()
+            optimizer.step()
+
+            running_loss += total_loss.item()
+
+            pbar.set_postfix(
+                total=f"{total_loss.item():.3f}",
+                remain=f"{loss_remain.item():.2f}",
+                future=f"{loss_future.item():.2f}"
+            )
+
+        avg_train_loss = running_loss / len(train_loader)
+        train_loss_curve.append(avg_train_loss)
 
         logger.info(
-            f"Epoch {epoch+1} Train SmoothL1 Loss (sec): {avg_loss:.2f}"
+            f"Epoch {epoch+1} Train Loss: {avg_train_loss:.3f}"
         )
 
-        # ---------------- Validation ----------------
+        # ==================================================
+        #                    Validation
+        # ==================================================
 
-        val_mae = validate(model, val_loader, device)
-        val_mae_history.append(val_mae)
+        val_mae, val_r2 = validate(model, val_loader, device)
 
-        logger.info(f"Epoch {epoch+1} Validation MAE (sec): {val_mae:.2f}")
+        val_mae_curve.append(val_mae)
+        val_r2_curve.append(val_r2)
 
-        # ---------------- Save Best ----------------
+        logger.info(
+            f"Epoch {epoch+1} Val MAE: {val_mae:.2f}s | R2: {val_r2:.4f}"
+        )
+
+        # ==================================================
+        #                  Save Best
+        # ==================================================
 
         if val_mae < best_mae:
 
@@ -273,39 +369,39 @@ def main():
 
             torch.save({
                 "epoch": epoch + 1,
-                "model": "Task1CNNBaseline",
-                "model_state": model.state_dict(),
-                "optimizer_state": optimizer.state_dict(),
+                "model": args.model,
+                "state_dict": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
                 "best_mae": best_mae,
                 "args": vars(args)
             }, best_ckpt_path)
 
-            logger.info("Saved best checkpoint → %s", best_ckpt_path)
-            logger.info("Best Validation MAE: %.2f", best_mae)
+            logger.info("Saved new best checkpoint")
 
+    # ==========================================================
+    #                  Training finished
+    # ==========================================================
 
-    logger.info("\nTraining finished.")
-    logger.info("Best Validation MAE: %.2f", best_mae)
+    logger.info("Training completed.")
+    logger.info(f"Best Val MAE: {best_mae:.2f}s")
 
-    # ---------------- Plot Loss Curve ----------------
+    # ---------------- Plot curves ----------------
 
     plt.figure(figsize=(8, 5))
 
-    plt.plot(train_loss_history, label="Train SmoothL1 Loss (sec)")
-    plt.plot(val_mae_history, label="Val MAE (sec)")
+    plt.plot(train_loss_curve, label="Train Loss")
+    plt.plot(val_mae_curve, label="Val MAE")
 
     plt.xlabel("Epoch")
     plt.ylabel("Value")
-    plt.title("Task1 Training Curve")
-
     plt.legend()
     plt.grid(True)
 
-    plot_path = os.path.join(exp_dir, "training_curve.png")
-    plt.savefig(plot_path, dpi=150, bbox_inches="tight")
+    curve_path = os.path.join(exp_dir, "training_curve.png")
+    plt.savefig(curve_path, dpi=150, bbox_inches="tight")
     plt.close()
 
-    logger.info(f"Training curve saved to: {plot_path}")
+    logger.info(f"Curve saved to {curve_path}")
 
 
 if __name__ == "__main__":

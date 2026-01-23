@@ -1,11 +1,11 @@
 import os
-import re
 import torch
 from torch.utils.data import Dataset
 import numpy as np
 from PIL import Image
 
-FPS_ORI = 25.0  # 原视频fps（Cholec80）
+FPS_ORI = 25.0
+
 PHASE2ID = {
     "Preparation": 0,
     "CalotTriangleDissection": 1,
@@ -16,25 +16,8 @@ PHASE2ID = {
     "GallbladderRetraction": 6
 }
 
-def extract_index(name):
-    base = os.path.splitext(name)[0]
-    return int(base.split("_")[-1])
-
 
 class Cholec80RemainingFramesDataset(Dataset):
-    """
-    从抽帧图片读取序列
-
-    假设：
-      - root_dir/frames/video_xx/ 下面是 1.jpg,2.jpg,...（或png）
-      - 标注 phase_annotations/video_xx-phase.txt 仍是原始逐帧标注（frame_id phase）
-
-    返回：
-      frames: [T, C, H, W] float32 in [0,1]
-      remaining_time_sec: float32 scalar (基于抽帧后的“有效秒”)
-      phase_id: int64 scalar
-    """
-
     def __init__(
         self,
         root_dir,
@@ -42,12 +25,13 @@ class Cholec80RemainingFramesDataset(Dataset):
         seq_len=16,
         stride=8,
         transform=None,
-        video_list=None,
-        sample_every=25,          # 每隔多少“原始帧”保留一帧；你这里是 25
-        frames_dirname="frames",  # 你的新目录名
+        sample_every=25,
+        max_future_events=10,
+        frames_dirname="frames",
         phase_dirname="phase_annotations",
         img_exts=(".jpg", ".jpeg", ".png")
     ):
+
         self.root_dir = root_dir
         self.frames_root = os.path.join(root_dir, frames_dirname)
         self.phase_dir = os.path.join(root_dir, phase_dirname)
@@ -56,95 +40,143 @@ class Cholec80RemainingFramesDataset(Dataset):
         self.stride = stride
         self.transform = transform
         self.sample_every = sample_every
-        self.fps_eff = FPS_ORI / float(sample_every)  # 抽帧后的有效fps；25/25=1fps
+
+        self.fps_eff = FPS_ORI / float(sample_every)
+
+        self.max_future_events = max_future_events
 
         self.img_exts = img_exts
         self.samples = []
         self.frame_cache = {}
-        
-        self.mode = mode  # "train", "test"
-        self._build_index(video_list)
-    
+
+        self.mode = mode
+        self._build_index()
+
+    # --------------------------------------------------
+    def _extract_phase_segments(self, phases):
+
+        segments = []
+        start = 0
+
+        for i in range(1, len(phases)):
+            if phases[i] != phases[i - 1]:
+                segments.append((phases[i - 1], start, i - 1))
+                start = i
+
+        segments.append((phases[-1], start, len(phases) - 1))
+
+        return segments
+
+    # --------------------------------------------------
+    def _compute_future_events(self, phases, cur_idx):
+
+        segments = self._extract_phase_segments(phases)
+
+        cur_seg_id = None
+        for i, (_, s, e) in enumerate(segments):
+            if s <= cur_idx <= e:
+                cur_seg_id = i
+                break
+
+        assert cur_seg_id is not None
+
+        future_segments = segments[cur_seg_id + 1:]
+
+        future_start = []
+        future_end = []
+        future_phase = []
+        future_mask = []
+
+        for pid, s, e in future_segments:
+
+            # absolute timeline (seconds)
+            start_t = s / self.fps_eff
+            end_t   = e / self.fps_eff
+
+            future_start.append(start_t)
+            future_end.append(end_t)
+            future_phase.append(pid)
+            future_mask.append(1)
+
+            if len(future_start) == self.max_future_events:
+                break
+
+        # padding
+        while len(future_start) < self.max_future_events:
+            future_start.append(0.)
+            future_end.append(0.)
+            future_phase.append(-1)
+            future_mask.append(0)
+
+        return future_start, future_end, future_phase, future_mask
+
+    # --------------------------------------------------
 
     def _load_phase_file(self, path):
-        frames = []
+
         phases = []
+
         with open(path, "r", encoding="utf-8") as f:
             for line_id, line in enumerate(f):
+
                 if line_id == 0 and ("Frame" in line or "frame" in line):
                     continue
+
                 parts = line.strip().split()
                 if len(parts) < 2:
                     continue
-                fid, phase = parts[0], parts[1]
-                frames.append(int(fid))
-                phases.append(PHASE2ID[phase])
-        return frames, phases
 
-    def _compute_remaining_time(self, phases, fps):
-        """
-        Task A (strict, minimal interpretation):
+                phases.append(PHASE2ID[parts[1]])
 
-        remaining_time[t] =
-            time until the end of the CURRENT surgical phase
+        return phases
 
-        phases: list[int]  # sampled phase id sequence
-        fps: effective fps after sampling
-        """
+    # --------------------------------------------------
+
+    def _compute_remaining_time(self, phases):
 
         n = len(phases)
-        remaining_sec = [0.0] * n
+        remaining = [0.0] * n
 
-        phase_start = 0
+        start = 0
         for i in range(1, n):
             if phases[i] != phases[i - 1]:
-                phase_end = i - 1
-                for t in range(phase_start, phase_end + 1):
-                    remaining_sec[t] = (phase_end - t) / fps
-                phase_start = i
+                end = i - 1
+                for t in range(start, end + 1):
+                    remaining[t] = (end - t) / self.fps_eff
+                start = i
 
-        # last phase
-        phase_end = n - 1
-        for t in range(phase_start, phase_end + 1):
-            remaining_sec[t] = (phase_end - t) / fps
+        end = n - 1
+        for t in range(start, end + 1):
+            remaining[t] = (end - t) / self.fps_eff
 
-        return remaining_sec
+        return remaining
+
+    # --------------------------------------------------
 
     def _list_frame_files(self, video_folder):
-        # cache: avoid listdir/sort every __getitem__
+
         if video_folder in self.frame_cache:
             return self.frame_cache[video_folder]
 
-        files = []
-        for fn in os.listdir(video_folder):
-            if fn.lower().endswith(self.img_exts):
-                files.append(fn)
-
-        def extract_index(name):
-            base = os.path.splitext(name)[0]
-            idx = base.split("_")[-1]
-            return int(idx)
-
-        files.sort(key=extract_index)
-        full_paths = [os.path.join(video_folder, f) for f in files]
-        self.frame_cache[video_folder] = full_paths
-        return full_paths
-
-
-    def _build_index(self, video_list=None):
-        # ---- step 1: collect & sort all videos ----
-        all_videos = [
-            v for v in sorted(os.listdir(self.frames_root))
-            if os.path.isdir(os.path.join(self.frames_root, v))
+        files = [
+            f for f in os.listdir(video_folder)
+            if f.lower().endswith(self.img_exts)
         ]
 
-        # sanity check
-        if len(all_videos) < 50:
-            raise RuntimeError(
-                f"Expected at least 50 videos, but found {len(all_videos)}"
-            )
+        files.sort(key=lambda x: int(os.path.splitext(x)[0].split("_")[-1]))
 
-        # ---- step 2: fixed split by mode (NO randomness) ----
+        full_paths = [os.path.join(video_folder, f) for f in files]
+
+        self.frame_cache[video_folder] = full_paths
+
+        return full_paths
+
+    # --------------------------------------------------
+
+    def _build_index(self):
+
+        all_videos = sorted(os.listdir(self.frames_root))
+
         if self.mode == "train":
             used_videos = all_videos[:40]
         elif self.mode == "val":
@@ -152,85 +184,106 @@ class Cholec80RemainingFramesDataset(Dataset):
         elif self.mode == "test":
             used_videos = all_videos[50:80]
         else:
-            raise ValueError(f"Unknown mode: {self.mode}")
+            raise ValueError(self.mode)
 
-        print(f"[{self.mode}] using videos: {used_videos[0]} ... {used_videos[-1]}")
-        print(f"[{self.mode}] using {len(used_videos)} videos")
+        print(f"[{self.mode}] videos:", len(used_videos))
 
-        # ---- step 3: build samples only from selected videos ----
         for video_name in used_videos:
-            video_folder = os.path.join(self.frames_root, video_name)
 
+            video_folder = os.path.join(self.frames_root, video_name)
             frame_paths = self._list_frame_files(video_folder)
+
             if len(frame_paths) < self.seq_len:
                 continue
 
             phase_path = os.path.join(self.phase_dir, f"{video_name}-phase.txt")
-            _, phases_full = self._load_phase_file(phase_path)
+            phases_full = self._load_phase_file(phase_path)
 
-            # downsample phases to match sampled frames
+            # downsample phase labels
             phases_sampled = []
             for k in range(len(frame_paths)):
-                ori_idx = k * self.sample_every
-                if ori_idx >= len(phases_full):
+                idx = k * self.sample_every
+                if idx >= len(phases_full):
                     break
-                phases_sampled.append(phases_full[ori_idx])
+                phases_sampled.append(phases_full[idx])
 
             usable_len = min(len(frame_paths), len(phases_sampled))
+
             frame_paths = frame_paths[:usable_len]
             phases_sampled = phases_sampled[:usable_len]
 
-            remaining_sec = self._compute_remaining_time(
-                phases_sampled, fps=self.fps_eff
-            )
+            remaining_sec = self._compute_remaining_time(phases_sampled)
 
             for start in range(0, usable_len - self.seq_len, self.stride):
+
                 end_idx = start + self.seq_len - 1
 
-                remain_s = remaining_sec[end_idx]   # 单位：秒
-                phase_id = phases_sampled[end_idx]
+                remain_time = remaining_sec[end_idx]
 
-                self.samples.append(
-                    (frame_paths, start, remain_s, phase_id)
-                )
+                future_start, future_end, future_phase, future_mask = \
+                    self._compute_future_events(phases_sampled, end_idx)
 
-        print(f"[{self.mode}] total samples: {len(self.samples)}")
+                self.samples.append((
+                    frame_paths,
+                    start,
+                    remain_time,
+                    future_start,
+                    future_end,
+                    future_phase,
+                    future_mask
+                ))
 
+        print(f"[{self.mode}] samples:", len(self.samples))
 
-    def _read_clip_from_paths(self, frame_paths, start_idx):
+    # --------------------------------------------------
+
+    def _read_clip(self, frame_paths, start_idx):
+
         paths = frame_paths[start_idx:start_idx + self.seq_len]
+
         frames = []
 
         for p in paths:
-            try:
-                img = Image.open(p).convert("RGB")
-            except Exception:
-                raise FileNotFoundError(f"Failed to read image: {p}")
+
+            img = Image.open(p).convert("RGB")
 
             if self.transform:
-                # torchvision transform usually expects PIL Image
                 img = self.transform(img)
             else:
-                # manually convert to tensor [C,H,W] in [0,1]
                 img = torch.from_numpy(
                     np.array(img, dtype=np.float32)
                 ).permute(2, 0, 1) / 255.0
 
             frames.append(img)
 
-        return torch.stack(frames, dim=0)
+        return torch.stack(frames)
 
+    # --------------------------------------------------
 
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        frame_paths, start, remain_sec, phase_id = self.samples[idx]
 
-        frames = self._read_clip_from_paths(frame_paths, start)
+        (
+            frame_paths,
+            start,
+            remain_time,
+            future_start,
+            future_end,
+            future_phase,
+            future_mask
+        ) = self.samples[idx]
+
+        frames = self._read_clip(frame_paths, start)
 
         return (
-            frames,                                   # [T,3,H,W]
-            torch.tensor(remain_sec, dtype=torch.float32),  # 秒
-            torch.tensor(phase_id, dtype=torch.long),
+            frames,
+            torch.tensor(remain_time, dtype=torch.float32),
+
+            torch.tensor(future_start, dtype=torch.float32),
+            torch.tensor(future_end, dtype=torch.float32),
+
+            torch.tensor(future_phase, dtype=torch.long),
+            torch.tensor(future_mask, dtype=torch.float32),
         )
