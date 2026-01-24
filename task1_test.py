@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import json
 
 from task1_data import Cholec80RemainingFramesDataset
-from models import Task1CNN, Task1CNNLSTM
+from models import TaskA_CNN, TaskA_CNN_LSTM
 
 
 # -------------------------------------------------
@@ -42,42 +42,149 @@ def parse_args():
 
 def build_model(model_name):
     if model_name == "cnn":
-        return Task1CNN()
+        return TaskA_CNN()
     elif model_name == "cnn_lstm":
-        return Task1CNNLSTM()
+        return TaskA_CNN_LSTM()
     else:
         raise ValueError("Unknown model type")
 
 
 @torch.no_grad()
-def run_test(model, loader, device):
+def run_test(model, loader, device, ignore_index=-1):
     model.eval()
 
-    gt_all, pred_all = [], []
+    # ---------- accumulators ----------
+    # Remaining
+    gt_remain_all = []
+    pred_remain_all = []
 
-    for frames, remain_sec, _ in tqdm(loader, desc="Test", ncols=120):
+    # Future time (masked)
+    sum_abs_start = 0.0
+    sum_abs_end = 0.0
+    sum_sq_start = 0.0
+    sum_sq_end = 0.0
+    count_future = 0.0  # number of valid future events across all samples
+
+    # Future phase (masked)
+    correct_phase = 0.0
+    count_phase = 0.0
+    ce_loss_sum = 0.0
+
+    # CE for phase (ignore padding)
+    ce_fn = nn.CrossEntropyLoss(reduction="none", ignore_index=ignore_index)
+
+    for batch in tqdm(loader, desc="Test", ncols=120):
+        (
+            frames,
+            remain_sec,
+            future_start,
+            future_end,
+            future_phase,
+            future_mask
+        ) = batch
+
         frames = frames.to(device, non_blocking=True)
         remain_sec = remain_sec.to(device, non_blocking=True)
 
-        pred_sec = model(frames)
+        future_start = future_start.to(device, non_blocking=True)
+        future_end   = future_end.to(device, non_blocking=True)
+        future_phase = future_phase.to(device, non_blocking=True)
+        future_mask  = future_mask.to(device, non_blocking=True)  # float 0/1
 
-        gt_all.append(remain_sec.cpu().numpy())
-        pred_all.append(pred_sec.cpu().numpy())
+        # -------- forward --------
+        pred_remain, pred_fstart, pred_fend, pred_phase_logits = model(frames)
 
-    gt = np.concatenate(gt_all).astype(np.float64)
-    pred = np.concatenate(pred_all).astype(np.float64)
+        # =========================================================
+        # 1) Remaining metrics
+        # =========================================================
+        gt_remain_all.append(remain_sec.detach().cpu().numpy())
+        pred_remain_all.append(pred_remain.detach().cpu().numpy())
+
+        # =========================================================
+        # 2) Future timeline metrics (mask)
+        # =========================================================
+        # shapes: [B,N]
+        abs_start = torch.abs(pred_fstart - future_start)
+        abs_end   = torch.abs(pred_fend   - future_end)
+
+        sq_start = (pred_fstart - future_start) ** 2
+        sq_end   = (pred_fend   - future_end) ** 2
+
+        # mask
+        sum_abs_start += (abs_start * future_mask).sum().item()
+        sum_abs_end   += (abs_end   * future_mask).sum().item()
+
+        sum_sq_start  += (sq_start  * future_mask).sum().item()
+        sum_sq_end    += (sq_end    * future_mask).sum().item()
+
+        count_future  += future_mask.sum().item()
+
+        # =========================================================
+        # 3) Future phase metrics (mask)
+        # =========================================================
+        # logits: [B,N,K], gt: [B,N]
+        B, N, K = pred_phase_logits.shape
+        pred_phase = pred_phase_logits.argmax(dim=-1)  # [B,N]
+
+        # accuracy (only valid events)
+        correct_phase += ((pred_phase == future_phase).float() * future_mask).sum().item()
+        count_phase   += future_mask.sum().item()
+
+        # cross entropy (masked, ignore_index already handles -1 too)
+        logits_flat = pred_phase_logits.view(B * N, K)
+        gt_flat     = future_phase.view(B * N)
+        mask_flat   = future_mask.view(B * N)
+
+        ce_all = ce_fn(logits_flat, gt_flat)  # [B*N]
+        ce_loss_sum += (ce_all * mask_flat).sum().item()
+
+    # ---------- Remaining aggregate ----------
+    gt = np.concatenate(gt_remain_all).astype(np.float64)
+    pred = np.concatenate(pred_remain_all).astype(np.float64)
 
     err = pred - gt
-    mae = float(np.mean(np.abs(err)))
-    rmse = float(np.sqrt(np.mean(err ** 2)))
+    remain_mae = float(np.mean(np.abs(err)))
+    remain_rmse = float(np.sqrt(np.mean(err ** 2)))
 
-    # R^2
     ss_res = float(np.sum((gt - pred) ** 2))
     ss_tot = float(np.sum((gt - np.mean(gt)) ** 2))
-    r2 = float("nan") if ss_tot == 0.0 else float(1.0 - ss_res / ss_tot)
+    remain_r2 = float("nan") if ss_tot == 0.0 else float(1.0 - ss_res / ss_tot)
 
-    return gt, pred, mae, rmse, r2
+    # ---------- Future timeline aggregate ----------
+    denom = max(count_future, 1e-6)
+    future_start_mae = sum_abs_start / denom
+    future_end_mae   = sum_abs_end   / denom
 
+    future_start_rmse = float(np.sqrt(sum_sq_start / denom))
+    future_end_rmse   = float(np.sqrt(sum_sq_end   / denom))
+
+    # ---------- Future phase aggregate ----------
+    denom_phase = max(count_phase, 1e-6)
+    future_phase_acc = correct_phase / denom_phase
+    future_phase_ce  = ce_loss_sum / denom_phase  # average CE over valid events
+
+    metrics = {
+        # Remaining
+        "remain_mae_sec": remain_mae,
+        "remain_rmse_sec": remain_rmse,
+        "remain_r2": remain_r2,
+
+        # Future timeline (per valid future event)
+        "future_start_mae_sec": future_start_mae,
+        "future_end_mae_sec": future_end_mae,
+        "future_start_rmse_sec": future_start_rmse,
+        "future_end_rmse_sec": future_end_rmse,
+
+        # Future phase (per valid future event)
+        "future_phase_acc": future_phase_acc,
+        "future_phase_ce": future_phase_ce,
+
+        # Counts
+        "n_samples": int(len(gt)),
+        "n_valid_future_events": float(count_future),
+    }
+
+    return gt, pred, metrics
 
 def plot_curve(gt, pred, out_path, start=0, length=1200, to_min=False, title="GT vs Prediction"):
     s = max(0, start)
@@ -160,13 +267,17 @@ def main():
     model = build_model(args.model).to(device)
 
     ckpt = torch.load(best_ckpt_path, map_location=device)
-    if isinstance(ckpt, dict) and "model_state" in ckpt:
-        model.load_state_dict(ckpt["model_state"], strict=True)
+
+    if isinstance(ckpt, dict) and "state_dict" in ckpt:
+        model.load_state_dict(ckpt["state_dict"], strict=True)
     else:
         model.load_state_dict(ckpt, strict=True)
 
     # ---------------- Run Test ----------------
-    gt, pred, mae, rmse, r2 = run_test(model, test_loader, device)
+    gt, pred, metrics = run_test(model, test_loader, device)
+    print("\n=== Test Results ===")
+    for k, v in metrics.items():
+        print(f"{k}: {v}")
 
     results = {
         "mae_sec": mae,
@@ -186,6 +297,10 @@ def main():
     with open(metrics_path, "w") as f:
         json.dump(results, f, indent=4)
     print("Saved metrics:", metrics_path)
+
+    metrics_path = os.path.join(exp_dir, "test_metrics.json")
+    with open(metrics_path, "w") as f:
+        json.dump(metrics, f, indent=4)
 
     # plot
     plot_path = os.path.join(exp_dir, args.plot_name)
