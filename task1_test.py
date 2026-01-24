@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import json
 
 from task1_data import Cholec80RemainingFramesDataset
-from models import TaskA_CNN, TaskA_CNN_LSTM
+from task1_model import TaskA_CNN, TaskA_CNN_LSTM
 
 
 # -------------------------------------------------

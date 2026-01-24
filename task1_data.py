@@ -4,7 +4,7 @@ from torch.utils.data import Dataset
 import numpy as np
 from PIL import Image
 
-FPS_ORI = 25.0
+FPS_ORI = 25
 
 PHASE2ID = {
     "Preparation": 0,
@@ -17,7 +17,7 @@ PHASE2ID = {
 }
 
 
-class Cholec80RemainingFramesDataset(Dataset):
+class Cholec80DatasetTaskA(Dataset):
     def __init__(
         self,
         root_dir,
@@ -25,11 +25,8 @@ class Cholec80RemainingFramesDataset(Dataset):
         seq_len=16,
         stride=8,
         transform=None,
-        sample_every=25,
-        max_future_events=10,
         frames_dirname="frames",
-        phase_dirname="phase_annotations",
-        img_exts=(".jpg", ".jpeg", ".png")
+        phase_dirname="phase_annotations"
     ):
 
         self.root_dir = root_dir
@@ -39,139 +36,11 @@ class Cholec80RemainingFramesDataset(Dataset):
         self.seq_len = seq_len
         self.stride = stride
         self.transform = transform
-        self.sample_every = sample_every
-
-        self.fps_eff = FPS_ORI / float(sample_every)
-
-        self.max_future_events = max_future_events
-
-        self.img_exts = img_exts
         self.samples = []
-        self.frame_cache = {}
 
         self.mode = mode
         self._build_index()
 
-    # --------------------------------------------------
-    def _extract_phase_segments(self, phases):
-
-        segments = []
-        start = 0
-
-        for i in range(1, len(phases)):
-            if phases[i] != phases[i - 1]:
-                segments.append((phases[i - 1], start, i - 1))
-                start = i
-
-        segments.append((phases[-1], start, len(phases) - 1))
-
-        return segments
-
-    # --------------------------------------------------
-    def _compute_future_events(self, phases, cur_idx):
-
-        segments = self._extract_phase_segments(phases)
-
-        cur_seg_id = None
-        for i, (_, s, e) in enumerate(segments):
-            if s <= cur_idx <= e:
-                cur_seg_id = i
-                break
-
-        assert cur_seg_id is not None
-
-        future_segments = segments[cur_seg_id + 1:]
-
-        future_start = []
-        future_end = []
-        future_phase = []
-        future_mask = []
-
-        for pid, s, e in future_segments:
-
-            # absolute timeline (seconds)
-            start_t = s / self.fps_eff
-            end_t   = e / self.fps_eff
-
-            future_start.append(start_t)
-            future_end.append(end_t)
-            future_phase.append(pid)
-            future_mask.append(1)
-
-            if len(future_start) == self.max_future_events:
-                break
-
-        # padding
-        while len(future_start) < self.max_future_events:
-            future_start.append(0.)
-            future_end.append(0.)
-            future_phase.append(-1)
-            future_mask.append(0)
-
-        return future_start, future_end, future_phase, future_mask
-
-    # --------------------------------------------------
-
-    def _load_phase_file(self, path):
-
-        phases = []
-
-        with open(path, "r", encoding="utf-8") as f:
-            for line_id, line in enumerate(f):
-
-                if line_id == 0 and ("Frame" in line or "frame" in line):
-                    continue
-
-                parts = line.strip().split()
-                if len(parts) < 2:
-                    continue
-
-                phases.append(PHASE2ID[parts[1]])
-
-        return phases
-
-    # --------------------------------------------------
-
-    def _compute_remaining_time(self, phases):
-
-        n = len(phases)
-        remaining = [0.0] * n
-
-        start = 0
-        for i in range(1, n):
-            if phases[i] != phases[i - 1]:
-                end = i - 1
-                for t in range(start, end + 1):
-                    remaining[t] = (end - t) / self.fps_eff
-                start = i
-
-        end = n - 1
-        for t in range(start, end + 1):
-            remaining[t] = (end - t) / self.fps_eff
-
-        return remaining
-
-    # --------------------------------------------------
-
-    def _list_frame_files(self, video_folder):
-
-        if video_folder in self.frame_cache:
-            return self.frame_cache[video_folder]
-
-        files = [
-            f for f in os.listdir(video_folder)
-            if f.lower().endswith(self.img_exts)
-        ]
-
-        files.sort(key=lambda x: int(os.path.splitext(x)[0].split("_")[-1]))
-
-        full_paths = [os.path.join(video_folder, f) for f in files]
-
-        self.frame_cache[video_folder] = full_paths
-
-        return full_paths
-
-    # --------------------------------------------------
 
     def _build_index(self):
 
@@ -189,50 +58,110 @@ class Cholec80RemainingFramesDataset(Dataset):
         print(f"[{self.mode}] videos:", len(used_videos))
 
         for video_name in used_videos:
+            # Notice: 先处理phase文件，得到阶段标签序列
+            phase_paths = os.path.join(self.phase_dir, f"{video_name}-phase.txt")
 
+            with open(phase_paths, "r") as f:
+                phase_lines = f.readlines()[1::FPS_ORI]  # skip header + downsample
+
+            phase_ids = []
+            stage_order = []
+            stage_durations = []   # 单位：秒
+
+            prev = None
+            cur_len = 0
+
+            for line in phase_lines:
+
+                parts_name = line.split("\t")[1].strip()
+
+                if parts_name not in PHASE2ID:
+                    raise ValueError(f"Unknown phase: {parts_name}")
+
+                pid = PHASE2ID[parts_name]
+                phase_ids.append(pid)
+
+                # ---------- workflow order + duration ----------
+                if pid != prev:
+                    if prev is not None:
+                        stage_durations.append(cur_len)
+                    stage_order.append(pid)
+                    cur_len = 1
+                    prev = pid
+
+                else:
+                    cur_len += 1
+
+            stage_durations.append(cur_len)
+
+            while len(stage_order) < 7:
+                stage_order.append(-1)
+            ## build samples
             video_folder = os.path.join(self.frames_root, video_name)
-            frame_paths = self._list_frame_files(video_folder)
 
-            if len(frame_paths) < self.seq_len:
-                continue
+            # -------- load frames --------
+            frame_names = sorted(os.listdir(video_folder))
+            frame_names = [f for f in frame_names if f.lower().endswith(".png")]
 
-            phase_path = os.path.join(self.phase_dir, f"{video_name}-phase.txt")
-            phases_full = self._load_phase_file(phase_path)
+            # 按 frame index 排序
+            frame_names.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
 
-            # downsample phase labels
-            phases_sampled = []
-            for k in range(len(frame_paths)):
-                idx = k * self.sample_every
-                if idx >= len(phases_full):
-                    break
-                phases_sampled.append(phases_full[idx])
+            frame_paths = [os.path.join(video_folder, f) for f in frame_names]
 
-            usable_len = min(len(frame_paths), len(phases_sampled))
+            # -------- 对齐 phase 与 frame --------
+            usable_len = min(len(frame_paths), len(phase_ids))
 
             frame_paths = frame_paths[:usable_len]
-            phases_sampled = phases_sampled[:usable_len]
+            phase_ids = phase_ids[:usable_len]
 
-            remaining_sec = self._compute_remaining_time(phases_sampled)
 
-            for start in range(0, usable_len - self.seq_len, self.stride):
+            N = usable_len
+
+            # -------- sliding window --------
+            for start in range(0, N - self.seq_len + 1, self.stride):
 
                 end_idx = start + self.seq_len - 1
 
-                remain_time = remaining_sec[end_idx]
+                # 连续 frames
+                clip_frame_paths = frame_paths[start:end_idx + 1]
 
-                future_start, future_end, future_phase, future_mask = \
-                    self._compute_future_events(phases_sampled, end_idx)
+                # 当前真实时间（秒）
+                cur_phase = phase_ids[end_idx]
 
-                self.samples.append((
-                    frame_paths,
-                    start,
-                    remain_time,
-                    future_start,
-                    future_end,
-                    future_phase,
-                    future_mask
-                ))
+                if cur_phase not in stage_order:
+                    continue
 
+                stage_pos = stage_order.index(cur_phase)
+
+                phase_start_idx = end_idx
+                while phase_start_idx > 0 and phase_ids[phase_start_idx-1] == cur_phase:
+                    phase_start_idx -= 1
+
+
+                offset_in_phase = end_idx - phase_start_idx
+
+                current_time = sum(stage_durations[:stage_pos]) + offset_in_phase
+
+
+                # 构建各阶段 remaining 时间向量
+                remain = current_time
+                time_list = []
+
+                for dur in stage_durations:
+                    if remain >= dur:
+                        time_list.append(0)
+                        remain -= dur
+                    else:
+                        time_list.append(dur - remain)
+                        remain = 0
+
+
+                # 构建 sample
+                self.samples.append({
+                    "frames": clip_frame_paths,
+                    "stage_order": stage_order,   # 已 padding 到 7
+                    "time": time_list
+                })
         print(f"[{self.mode}] samples:", len(self.samples))
 
     # --------------------------------------------------
@@ -265,25 +194,41 @@ class Cholec80RemainingFramesDataset(Dataset):
 
     def __getitem__(self, idx):
 
-        (
-            frame_paths,
-            start,
-            remain_time,
-            future_start,
-            future_end,
-            future_phase,
-            future_mask
-        ) = self.samples[idx]
+        sample = self.samples[idx]
+        frame_paths = sample["frames"]
+        stage_order = sample["stage_order"]
+        time_list = sample["time"]
 
-        frames = self._read_clip(frame_paths, start)
+        frames = []
+        for p in frame_paths:
+            img = Image.open(p).convert("RGB")
+
+            if self.transform:
+                img = self.transform(img)
+            else:
+                img = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+
+            frames.append(img)
+
+        frames = torch.stack(frames, dim=0)  # [8,3,H,W]
 
         return (
             frames,
-            torch.tensor(remain_time, dtype=torch.float32),
-
-            torch.tensor(future_start, dtype=torch.float32),
-            torch.tensor(future_end, dtype=torch.float32),
-
-            torch.tensor(future_phase, dtype=torch.long),
-            torch.tensor(future_mask, dtype=torch.float32),
+            torch.tensor(stage_order, dtype=torch.long),
+            torch.tensor(time_list, dtype=torch.float32)
         )
+
+
+
+if __name__ == "__main__":
+
+    dataset = Cholec80DatasetTaskA(
+        root_dir="data/cholec80",
+        mode="train"
+    )
+
+    frames, stage_order, time_list = dataset[0]
+
+    print("Image shape:", frames.shape)
+    print("Label shape:", stage_order)
+    print("Time list:", time_list)

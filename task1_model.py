@@ -2,18 +2,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import torch
+import torch.nn as nn
+from torchvision.models import resnet34
 
 
 class TaskA_CNN(nn.Module):
     """
     Input:
         frames: [B, T, 3, H, W]
+        stage： [B, T]  每个时间步的阶段标签（0~6）
 
     Output:
         remaining_time:      [B]
-        future_start_times:  [B, N] 
-        future_end_times:    [B, N]
-        future_phase_logits: [B, N, K]
     """
 
     def __init__(

@@ -8,9 +8,10 @@ from tqdm import tqdm
 import random
 import logging
 
-from task1_data import Cholec80RemainingFramesDataset
-from models import TaskA_CNN, TaskA_CNN_LSTM
-
+from task1_data import Cholec80DatasetTaskA
+from task1_model import Res34, TaskA_CNN, TaskA_CNN_LSTM
+import numpy as np
+from sklearn.metrics import r2_score
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -27,6 +28,7 @@ def parse_args():
 
     parser.add_argument("--name", type=str,required=True)
     parser.add_argument("--epochs", type=int,required=True)
+
     parser.add_argument("--model", type=str, required=True, choices=["cnn", "cnn_lstm"])
 
     parser.add_argument("--data_root", type=str,default="data/cholec80")
@@ -104,46 +106,41 @@ def build_model(model_name):
         return TaskA_CNN_LSTM()
 
 
-# Validation function
-def validate(model, loader, device):
+
+def validate_phase_remain(model, loader, device):
 
     model.eval()
 
-    mae_sum = 0.0
-    count = 0
-
-    all_gt = []
-    all_pred = []
+    preds = []
+    gts = []
 
     with torch.no_grad():
 
-        for batch in tqdm(loader, desc="Valid", leave=False):
-
-            frames, remain_sec, *_ = batch
+        for frames, stage_order, time_list in loader:
 
             frames = frames.to(device)
-            remain_sec = remain_sec.to(device)
+            time_list = time_list.to(device)
 
-            # ---- unpack model output ----
-            pred_remain, _, _, _ = model(frames)
+            cur_stage_idx = (time_list > 0).float().argmax(dim=1)
 
-            # ---- MAE ----
-            mae_sum += torch.abs(pred_remain - remain_sec).sum().item()
-            count += remain_sec.size(0)
+            phase_remain_sec = time_list.gather(
+                1,
+                cur_stage_idx.unsqueeze(1)
+            ).squeeze(1)
 
-            # ---- store for R2 ----
-            all_gt.append(remain_sec.cpu())
-            all_pred.append(pred_remain.cpu())
+            pred = model(frames)
 
-    gt = torch.cat(all_gt)
-    pred = torch.cat(all_pred)
+            preds.append(pred.cpu().numpy())
+            gts.append(phase_remain_sec.cpu().numpy())
 
-    ss_res = ((gt - pred) ** 2).sum()
-    ss_tot = ((gt - gt.mean()) ** 2).sum()
+    preds = np.concatenate(preds)
+    gts = np.concatenate(gts)
 
-    r2 = 1 - ss_res / ss_tot
+    mae = np.mean(np.abs(preds - gts))
+    r2 = r2_score(gts, preds)
 
-    return mae_sum / count, r2.item()
+    return mae, r2
+
 
 # Main training
 def main():
@@ -191,7 +188,7 @@ def main():
 
     # ---------------- Dataset ----------------
 
-    train_dataset = Cholec80RemainingFramesDataset(
+    train_dataset = Cholec80DatasetTaskA(
         root_dir=args.data_root,
         mode="train",
         seq_len=args.seq_len,
@@ -199,7 +196,7 @@ def main():
         transform=transform,
     )
 
-    val_dataset = Cholec80RemainingFramesDataset(
+    val_dataset = Cholec80DatasetTaskA(
         root_dir=args.data_root,
         mode="val",
         seq_len=args.seq_len,
@@ -239,12 +236,8 @@ def main():
     )
 
     # ---------- Loss functions ----------
+    criterion = nn.SmoothL1Loss()
 
-    criterion_remain = nn.SmoothL1Loss()
-    criterion_phase = nn.CrossEntropyLoss(
-        reduction="none",
-        ignore_index=-1
-    )
 
     # Loss weights (can report as hyper-parameters)
     lambda_remain = 1.0
@@ -264,101 +257,70 @@ def main():
     for epoch in range(args.epochs):
 
         model.train()
-
         running_loss = 0.0
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}")
 
         for step, batch in enumerate(pbar):
 
-            (
-                frames,
-                remain_sec,
-                future_start,
-                future_end,
-                future_phase,
-                future_mask
-            ) = batch
+            # ==================================================
+            #                Load batch
+            # ==================================================
 
-            # -------- Move to GPU --------
+            frames, stage_order, time_list = batch
 
             frames = frames.to(device)
-            remain_sec = remain_sec.to(device)
+            time_list = time_list.to(device)
 
-            future_start = future_start.to(device)
-            future_end   = future_end.to(device)
-            future_phase = future_phase.to(device)
-            future_mask  = future_mask.to(device)
+            # ==================================================
+            #      Extract current phase remaining time
+            # ==================================================
+            # time_list: [B, 7]
+            # 当前阶段 = 第一个 remaining > 0 的阶段
 
-            # -------- Debug once --------
+            cur_stage_idx = (time_list > 0).float().argmax(dim=1)
+
+            phase_remain_sec = time_list.gather(
+                1,
+                cur_stage_idx.unsqueeze(1)
+            ).squeeze(1)   # [B]
+
+            # ==================================================
+            #               Debug (once)
+            # ==================================================
 
             if epoch == 0 and step == 0:
                 logger.info(
-                    f"Remain GT range: "
-                    f"{remain_sec.min():.1f}s - {remain_sec.max():.1f}s"
+                    f"Phase Remain GT range: "
+                    f"{phase_remain_sec.min():.1f}s - "
+                    f"{phase_remain_sec.max():.1f}s"
                 )
 
-            # -------- Forward --------
-
-            pred_remain, pred_fstart, pred_fend, pred_phase_logits = model(frames)
-
             # ==================================================
-            #                  Loss computation
+            #                 Forward
             # ==================================================
 
-            # ---- Remaining time regression ----
-
-            loss_remain = criterion_remain(
-                pred_remain,
-                remain_sec
-            )
-
-            # ---- Future timeline loss (masked L1) ----
-            time_error = torch.abs(pred_fstart - future_start) \
-                       + torch.abs(pred_fend - future_end)
-
-            loss_future = (
-                time_error * future_mask
-            ).sum() / (future_mask.sum() + 1e-6)
-
-            # ---- Phase classification loss (masked CE) ----
-
-            B, N, K = pred_phase_logits.shape
-
-            logits_flat = pred_phase_logits.view(B * N, K)
-            phase_gt_flat = future_phase.view(B * N)
-            mask_flat = future_mask.view(B * N)
-
-            phase_loss_all = criterion_phase(
-                logits_flat,
-                phase_gt_flat
-            )
-
-            loss_phase = (
-                phase_loss_all * mask_flat
-            ).sum() / (mask_flat.sum() + 1e-6)
-
-            # ---- Total loss ----
-
-            total_loss = (
-                lambda_remain * loss_remain +
-                lambda_future * loss_future +
-                lambda_phase * loss_phase
-            )
+            pred_phase_remain = model(frames)   # [B]
 
             # ==================================================
-            #                 Backprop
+            #                  Loss
             # ==================================================
+
+            loss = criterion(pred_phase_remain, phase_remain_sec)
+
+            # ==================================================
+            #                Backprop
+            # ==================================================
+
             optimizer.zero_grad()
-            total_loss.backward()
+            loss.backward()
             optimizer.step()
 
-            running_loss += total_loss.item()
+            running_loss += loss.item()
 
             pbar.set_postfix(
-                total=f"{total_loss.item():.3f}",
-                remain=f"{loss_remain.item():.2f}",
-                future=f"{loss_future.item():.2f}"
+                loss=f"{loss.item():.3f}",
+                gt_mean=f"{phase_remain_sec.mean():.1f}s"
             )
 
         avg_train_loss = running_loss / len(train_loader)
@@ -369,10 +331,14 @@ def main():
         )
 
         # ==================================================
-        #                    Validation
+        #                   Validation
         # ==================================================
 
-        val_mae, val_r2 = validate(model, val_loader, device)
+        val_mae, val_r2 = validate_phase_remain(
+            model,
+            val_loader,
+            device
+        )
 
         val_mae_curve.append(val_mae)
         val_r2_curve.append(val_r2)
@@ -382,7 +348,7 @@ def main():
         )
 
         # ==================================================
-        #                  Save Best
+        #                 Save Best
         # ==================================================
 
         if val_mae < best_mae:
@@ -391,7 +357,6 @@ def main():
 
             torch.save({
                 "epoch": epoch + 1,
-                "model": args.model,
                 "state_dict": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "best_mae": best_mae,
@@ -400,6 +365,7 @@ def main():
 
             logger.info("Saved new best checkpoint")
 
+# Notice
     # ==========================================================
     #                  Training finished
     # ==========================================================
