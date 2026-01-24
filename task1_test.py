@@ -9,7 +9,10 @@ import matplotlib.pyplot as plt
 import json
 
 from task1_data import Cholec80RemainingFramesDataset
+
 from models import TaskA_CNN, TaskA_CNN_LSTM
+
+
 
 
 # -------------------------------------------------
@@ -49,31 +52,17 @@ def build_model(model_name):
         raise ValueError("Unknown model type")
 
 
+
 @torch.no_grad()
-def run_test(model, loader, device, ignore_index=-1):
+def run_test(model, loader, device):
+
     model.eval()
 
-    # ---------- accumulators ----------
-    # Remaining
-    gt_remain_all = []
-    pred_remain_all = []
-
-    # Future time (masked)
-    sum_abs_start = 0.0
-    sum_abs_end = 0.0
-    sum_sq_start = 0.0
-    sum_sq_end = 0.0
-    count_future = 0.0  # number of valid future events across all samples
-
-    # Future phase (masked)
-    correct_phase = 0.0
-    count_phase = 0.0
-    ce_loss_sum = 0.0
-
-    # CE for phase (ignore padding)
-    ce_fn = nn.CrossEntropyLoss(reduction="none", ignore_index=ignore_index)
+    gt_all = []
+    pred_all = []
 
     for batch in tqdm(loader, desc="Test", ncols=120):
+
         (
             frames,
             remain_sec,
@@ -86,69 +75,27 @@ def run_test(model, loader, device, ignore_index=-1):
         frames = frames.to(device, non_blocking=True)
         remain_sec = remain_sec.to(device, non_blocking=True)
 
-        future_start = future_start.to(device, non_blocking=True)
-        future_end   = future_end.to(device, non_blocking=True)
-        future_phase = future_phase.to(device, non_blocking=True)
-        future_mask  = future_mask.to(device, non_blocking=True)  # float 0/1
+        # -------- Forward --------
 
-        # -------- forward --------
-        pred_remain, pred_fstart, pred_fend, pred_phase_logits = model(frames)
+        pred_remain, _, _, _ = model(frames)
 
-        # =========================================================
-        # 1) Remaining metrics
-        # =========================================================
-        gt_remain_all.append(remain_sec.detach().cpu().numpy())
-        pred_remain_all.append(pred_remain.detach().cpu().numpy())
+        gt_all.append(remain_sec.cpu().numpy())
+        pred_all.append(pred_remain.cpu().numpy())
 
-        # =========================================================
-        # 2) Future timeline metrics (mask)
-        # =========================================================
-        # shapes: [B,N]
-        abs_start = torch.abs(pred_fstart - future_start)
-        abs_end   = torch.abs(pred_fend   - future_end)
-
-        sq_start = (pred_fstart - future_start) ** 2
-        sq_end   = (pred_fend   - future_end) ** 2
-
-        # mask
-        sum_abs_start += (abs_start * future_mask).sum().item()
-        sum_abs_end   += (abs_end   * future_mask).sum().item()
-
-        sum_sq_start  += (sq_start  * future_mask).sum().item()
-        sum_sq_end    += (sq_end    * future_mask).sum().item()
-
-        count_future  += future_mask.sum().item()
-
-        # =========================================================
-        # 3) Future phase metrics (mask)
-        # =========================================================
-        # logits: [B,N,K], gt: [B,N]
-        B, N, K = pred_phase_logits.shape
-        pred_phase = pred_phase_logits.argmax(dim=-1)  # [B,N]
-
-        # accuracy (only valid events)
-        correct_phase += ((pred_phase == future_phase).float() * future_mask).sum().item()
-        count_phase   += future_mask.sum().item()
-
-        # cross entropy (masked, ignore_index already handles -1 too)
-        logits_flat = pred_phase_logits.view(B * N, K)
-        gt_flat     = future_phase.view(B * N)
-        mask_flat   = future_mask.view(B * N)
-
-        ce_all = ce_fn(logits_flat, gt_flat)  # [B*N]
-        ce_loss_sum += (ce_all * mask_flat).sum().item()
-
-    # ---------- Remaining aggregate ----------
-    gt = np.concatenate(gt_remain_all).astype(np.float64)
-    pred = np.concatenate(pred_remain_all).astype(np.float64)
+    gt = np.concatenate(gt_all).astype(np.float64)
+    pred = np.concatenate(pred_all).astype(np.float64)
 
     err = pred - gt
-    remain_mae = float(np.mean(np.abs(err)))
-    remain_rmse = float(np.sqrt(np.mean(err ** 2)))
+
+    mae = float(np.mean(np.abs(err)))
+    rmse = float(np.sqrt(np.mean(err ** 2)))
+
+    # -------- R2 --------
 
     ss_res = float(np.sum((gt - pred) ** 2))
     ss_tot = float(np.sum((gt - np.mean(gt)) ** 2))
-    remain_r2 = float("nan") if ss_tot == 0.0 else float(1.0 - ss_res / ss_tot)
+
+    r2 = float("nan") if ss_tot == 0.0 else float(1.0 - ss_res / ss_tot)
 
     # ---------- Future timeline aggregate ----------
     denom = max(count_future, 1e-6)
@@ -272,6 +219,7 @@ def main():
         model.load_state_dict(ckpt["state_dict"], strict=True)
     else:
         model.load_state_dict(ckpt, strict=True)
+
 
     # ---------------- Run Test ----------------
     gt, pred, metrics = run_test(model, test_loader, device)
