@@ -9,7 +9,10 @@ import matplotlib.pyplot as plt
 import json
 
 from task1_data import Cholec80RemainingFramesDataset
-from models import Task1CNN, Task1CNNLSTM
+
+from models import TaskA_CNN, TaskA_CNN_LSTM
+
+
 
 
 # -------------------------------------------------
@@ -42,38 +45,56 @@ def parse_args():
 
 def build_model(model_name):
     if model_name == "cnn":
-        return Task1CNN()
+        return TaskA_CNN()
     elif model_name == "cnn_lstm":
-        return Task1CNNLSTM()
+        return TaskA_CNN_LSTM()
     else:
         raise ValueError("Unknown model type")
 
 
+
 @torch.no_grad()
 def run_test(model, loader, device):
+
     model.eval()
 
-    gt_all, pred_all = [], []
+    gt_all = []
+    pred_all = []
 
-    for frames, remain_sec, _ in tqdm(loader, desc="Test", ncols=120):
+    for batch in tqdm(loader, desc="Test", ncols=120):
+
+        (
+            frames,
+            remain_sec,
+            future_start,
+            future_end,
+            future_phase,
+            future_mask
+        ) = batch
+
         frames = frames.to(device, non_blocking=True)
         remain_sec = remain_sec.to(device, non_blocking=True)
 
-        pred_sec = model(frames)
+        # -------- Forward --------
+
+        pred_remain, _, _, _ = model(frames)
 
         gt_all.append(remain_sec.cpu().numpy())
-        pred_all.append(pred_sec.cpu().numpy())
+        pred_all.append(pred_remain.cpu().numpy())
 
     gt = np.concatenate(gt_all).astype(np.float64)
     pred = np.concatenate(pred_all).astype(np.float64)
 
     err = pred - gt
+
     mae = float(np.mean(np.abs(err)))
     rmse = float(np.sqrt(np.mean(err ** 2)))
 
-    # R^2
+    # -------- R2 --------
+
     ss_res = float(np.sum((gt - pred) ** 2))
     ss_tot = float(np.sum((gt - np.mean(gt)) ** 2))
+
     r2 = float("nan") if ss_tot == 0.0 else float(1.0 - ss_res / ss_tot)
 
     return gt, pred, mae, rmse, r2
@@ -160,10 +181,12 @@ def main():
     model = build_model(args.model).to(device)
 
     ckpt = torch.load(best_ckpt_path, map_location=device)
-    if isinstance(ckpt, dict) and "model_state" in ckpt:
-        model.load_state_dict(ckpt["model_state"], strict=True)
+
+    if isinstance(ckpt, dict) and "state_dict" in ckpt:
+        model.load_state_dict(ckpt["state_dict"], strict=True)
     else:
         model.load_state_dict(ckpt, strict=True)
+
 
     # ---------------- Run Test ----------------
     gt, pred, mae, rmse, r2 = run_test(model, test_loader, device)
