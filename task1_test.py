@@ -9,18 +9,15 @@ import matplotlib.pyplot as plt
 import json
 
 from task1_data import Cholec80RemainingFramesDataset
-
 from models import TaskA_CNN, TaskA_CNN_LSTM
 
 
-
-
 # -------------------------------------------------
-# Argument Parser (match your train.py style)
+# Argument Parser
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--name", type=str, required=True)   # experiment folder name
+    parser.add_argument("--name", type=str, required=True)
     parser.add_argument("--model", type=str, required=True, choices=["cnn", "cnn_lstm"])
 
     parser.add_argument("--data_root", type=str, default="data/cholec80")
@@ -34,15 +31,16 @@ def parse_args():
 
     parser.add_argument("--device", type=str, default="cuda")
 
-    # plot controls
-    parser.add_argument("--start", type=int, default=0)          # sample index start
-    parser.add_argument("--length", type=int, default=1200)      # how many points to plot
-    parser.add_argument("--to_min", action="store_true")         # plot in minutes
+    # plot
+    parser.add_argument("--start", type=int, default=0)
+    parser.add_argument("--length", type=int, default=1200)
+    parser.add_argument("--to_min", action="store_true")
     parser.add_argument("--plot_name", type=str, default="gt_vs_pred_test.png")
 
     return parser.parse_args()
 
 
+# -------------------------------------------------
 def build_model(model_name):
     if model_name == "cnn":
         return TaskA_CNN()
@@ -52,7 +50,7 @@ def build_model(model_name):
         raise ValueError("Unknown model type")
 
 
-
+# -------------------------------------------------
 @torch.no_grad()
 def run_test(model, loader, device):
 
@@ -76,64 +74,41 @@ def run_test(model, loader, device):
         remain_sec = remain_sec.to(device, non_blocking=True)
 
         # -------- Forward --------
-
         pred_remain, _, _, _ = model(frames)
 
         gt_all.append(remain_sec.cpu().numpy())
         pred_all.append(pred_remain.cpu().numpy())
 
+    # -------- Stack --------
     gt = np.concatenate(gt_all).astype(np.float64)
     pred = np.concatenate(pred_all).astype(np.float64)
 
+    # -------- Metrics --------
     err = pred - gt
 
     mae = float(np.mean(np.abs(err)))
     rmse = float(np.sqrt(np.mean(err ** 2)))
-
-    # -------- R2 --------
 
     ss_res = float(np.sum((gt - pred) ** 2))
     ss_tot = float(np.sum((gt - np.mean(gt)) ** 2))
 
     r2 = float("nan") if ss_tot == 0.0 else float(1.0 - ss_res / ss_tot)
 
-    # ---------- Future timeline aggregate ----------
-    denom = max(count_future, 1e-6)
-    future_start_mae = sum_abs_start / denom
-    future_end_mae   = sum_abs_end   / denom
-
-    future_start_rmse = float(np.sqrt(sum_sq_start / denom))
-    future_end_rmse   = float(np.sqrt(sum_sq_end   / denom))
-
-    # ---------- Future phase aggregate ----------
-    denom_phase = max(count_phase, 1e-6)
-    future_phase_acc = correct_phase / denom_phase
-    future_phase_ce  = ce_loss_sum / denom_phase  # average CE over valid events
-
     metrics = {
-        # Remaining
-        "remain_mae_sec": remain_mae,
-        "remain_rmse_sec": remain_rmse,
-        "remain_r2": remain_r2,
-
-        # Future timeline (per valid future event)
-        "future_start_mae_sec": future_start_mae,
-        "future_end_mae_sec": future_end_mae,
-        "future_start_rmse_sec": future_start_rmse,
-        "future_end_rmse_sec": future_end_rmse,
-
-        # Future phase (per valid future event)
-        "future_phase_acc": future_phase_acc,
-        "future_phase_ce": future_phase_ce,
-
-        # Counts
+        "remain_mae_sec": mae,
+        "remain_rmse_sec": rmse,
+        "remain_r2": r2,
+        "remain_mae_min": mae / 60.0,
+        "remain_rmse_min": rmse / 60.0,
         "n_samples": int(len(gt)),
-        "n_valid_future_events": float(count_future),
     }
 
     return gt, pred, metrics
 
+
+# -------------------------------------------------
 def plot_curve(gt, pred, out_path, start=0, length=1200, to_min=False, title="GT vs Prediction"):
+
     s = max(0, start)
     e = min(len(gt), s + length)
 
@@ -155,9 +130,11 @@ def plot_curve(gt, pred, out_path, start=0, length=1200, to_min=False, title="GT
     plt.figure(figsize=(12, 5))
     plt.plot(x, gt_seg, label="Ground Truth", linewidth=2)
     plt.plot(x, pred_seg, label="Prediction", linewidth=1, alpha=0.85)
+
     plt.title(f"{title} (Segment MAE: {mae_min:.2f} min)")
-    plt.xlabel("Frame Sequence (sample index)")
+    plt.xlabel("Sample Index")
     plt.ylabel(ylab)
+
     plt.grid(True, linestyle="--", alpha=0.4)
     plt.legend()
     plt.tight_layout()
@@ -167,7 +144,9 @@ def plot_curve(gt, pred, out_path, start=0, length=1200, to_min=False, title="GT
     plt.close()
 
 
+# -------------------------------------------------
 def main():
+
     args = parse_args()
 
     # ---------------- Paths ----------------
@@ -175,15 +154,16 @@ def main():
     best_ckpt_path = os.path.join(exp_dir, "best.pth")
 
     if not os.path.exists(best_ckpt_path):
-        raise FileNotFoundError(f"Cannot find checkpoint: {best_ckpt_path}")
+        raise FileNotFoundError(f"Checkpoint not found: {best_ckpt_path}")
 
     # ---------------- Device ----------------
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
-    print("Using device:", device)
+
+    print("Device:", device)
     print("Experiment:", args.name)
     print("Checkpoint:", best_ckpt_path)
 
-    # ---------------- Transform (same as train) ----------------
+    # ---------------- Transform ----------------
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -193,10 +173,10 @@ def main():
         ),
     ])
 
-    # ---------------- Dataset (TEST split) ----------------
+    # ---------------- Dataset ----------------
     test_dataset = Cholec80RemainingFramesDataset(
         root_dir=args.data_root,
-        mode="test",                 # video 51–80
+        mode="test",
         seq_len=args.seq_len,
         stride=args.stride,
         transform=transform,
@@ -210,6 +190,8 @@ def main():
         pin_memory=(device.type == "cuda"),
     )
 
+    print("Test samples:", len(test_dataset))
+
     # ---------------- Model ----------------
     model = build_model(args.model).to(device)
 
@@ -220,38 +202,25 @@ def main():
     else:
         model.load_state_dict(ckpt, strict=True)
 
+    print("Checkpoint loaded")
 
     # ---------------- Run Test ----------------
     gt, pred, metrics = run_test(model, test_loader, device)
-    print("\n=== Test Results ===")
+
+    print("\n===== Test Results =====")
     for k, v in metrics.items():
         print(f"{k}: {v}")
 
-    results = {
-        "mae_sec": mae,
-        "rmse_sec": rmse,
-        "r2": r2,
-        "mae_min": mae / 60.0,
-        "rmse_min": rmse / 60.0,
-        "n_samples": int(len(gt)),
-    }
-
-    print("\n=== Test Results ===")
-    for k, v in results.items():
-        print(f"{k}: {v}")
-
-    # save metrics
-    metrics_path = os.path.join(exp_dir, "test_metrics.json")
-    with open(metrics_path, "w") as f:
-        json.dump(results, f, indent=4)
-    print("Saved metrics:", metrics_path)
-
+    # ---------------- Save Metrics ----------------
     metrics_path = os.path.join(exp_dir, "test_metrics.json")
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=4)
 
-    # plot
+    print("Saved metrics to:", metrics_path)
+
+    # ---------------- Plot ----------------
     plot_path = os.path.join(exp_dir, args.plot_name)
+
     plot_curve(
         gt, pred,
         out_path=plot_path,
@@ -260,7 +229,8 @@ def main():
         to_min=args.to_min,
         title=f"Test: {args.name}"
     )
-    print("Saved plot:", plot_path)
+
+    print("Saved plot to:", plot_path)
 
 
 if __name__ == "__main__":

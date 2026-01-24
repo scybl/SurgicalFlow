@@ -314,7 +314,6 @@ def main():
             )
 
             # ---- Future timeline loss (masked L1) ----
-
             time_error = torch.abs(pred_fstart - future_start) \
                        + torch.abs(pred_fend - future_end)
 
@@ -350,7 +349,6 @@ def main():
             # ==================================================
             #                 Backprop
             # ==================================================
-
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
