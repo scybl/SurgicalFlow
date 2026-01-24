@@ -108,21 +108,42 @@ def build_model(model_name):
 def validate(model, loader, device):
 
     model.eval()
+
     mae_sum = 0.0
     count = 0
 
+    all_gt = []
+    all_pred = []
+
     with torch.no_grad():
-        for frames, remain_sec, future_start, future_end, future_phase, future_mask in tqdm(loader, desc="Valid", leave=False):
+
+        for batch in tqdm(loader, desc="Valid", leave=False):
+
+            frames, remain_sec, *_ = batch
 
             frames = frames.to(device)
             remain_sec = remain_sec.to(device)
 
-            pred_sec = model(frames)
+            # ---- unpack model output ----
+            pred_remain, _, _, _ = model(frames)
 
-            mae_sum += torch.abs(pred_sec - remain_sec).sum().item()
+            # ---- MAE ----
+            mae_sum += torch.abs(pred_remain - remain_sec).sum().item()
             count += remain_sec.size(0)
 
-    return mae_sum / count   # MAE in seconds
+            # ---- store for R2 ----
+            all_gt.append(remain_sec.cpu())
+            all_pred.append(pred_remain.cpu())
+
+    gt = torch.cat(all_gt)
+    pred = torch.cat(all_pred)
+
+    ss_res = ((gt - pred) ** 2).sum()
+    ss_tot = ((gt - gt.mean()) ** 2).sum()
+
+    r2 = 1 - ss_res / ss_tot
+
+    return mae_sum / count, r2.item()
 
 # Main training
 def main():
@@ -220,7 +241,10 @@ def main():
     # ---------- Loss functions ----------
 
     criterion_remain = nn.SmoothL1Loss()
-    criterion_phase = nn.CrossEntropyLoss(reduction="none")
+    criterion_phase = nn.CrossEntropyLoss(
+        reduction="none",
+        ignore_index=-1
+    )
 
     # Loss weights (can report as hyper-parameters)
     lambda_remain = 1.0
