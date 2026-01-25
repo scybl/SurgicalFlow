@@ -9,24 +9,20 @@ from torchvision.models import resnet34
 
 class TaskA_CNN(nn.Module):
     """
+    Multi-task:
+      - Phase classification
+      - Phase remaining time regression
+
     Input:
         frames: [B, T, 3, H, W]
-        stage： [B, T]  每个时间步的阶段标签（0~6）
 
     Output:
-        remaining_time:      [B]
+        phase_logits: [B,7]
+        phase_remain: [B]
     """
 
-    def __init__(
-        self,
-        num_phase_types=7,
-        max_future_events=10,
-        dropout=0.3
-    ):
+    def __init__(self, num_phases=7, dropout=0.3):
         super().__init__()
-
-        self.num_phase_types = num_phase_types
-        self.max_future_events = max_future_events
 
         # ---------------- CNN Backbone ----------------
 
@@ -57,12 +53,9 @@ class TaskA_CNN(nn.Module):
 
         # ---------------- Temporal Aggregation ----------------
 
-        # 用平均池化代替 LSTM
-        # 输入: [B, T, 256] → 输出: [B, 256]
-
         self.temporal_dropout = nn.Dropout(dropout)
 
-        # ---------------- Shared FC ----------------
+        # ---------------- Shared Representation ----------------
 
         self.shared_fc = nn.Sequential(
             nn.Linear(256, 128),
@@ -70,55 +63,38 @@ class TaskA_CNN(nn.Module):
             nn.Dropout(dropout)
         )
 
-        # ---------------- Output Heads ----------------
+        # ---------------- Heads ----------------
 
-        self.remaining_head = nn.Linear(128, 1)
+        # phase classification
+        self.phase_head = nn.Linear(128, num_phases)
 
-        self.future_start_head = nn.Linear(128, max_future_events)
-        self.future_end_head   = nn.Linear(128, max_future_events)
-
-        self.future_phase_head = nn.Linear(
-            128, max_future_events * num_phase_types
-        )
+        # phase remaining regression
+        self.remain_head = nn.Linear(128, 1)
 
     def forward(self, frames):
-        """
-        frames: [B, T, 3, H, W]
-        """
 
         B, T, C, H, W = frames.shape
 
-        # -------- CNN per frame --------
-
+        # CNN per frame
         x = frames.view(B * T, C, H, W)
 
         feat = self.backbone(x)
-        feat = self.gap(feat)              # [B*T, 256, 1, 1]
-        feat = feat.view(B, T, -1)         # [B, T, 256]
+        feat = self.gap(feat)                 # [B*T,256,1,1]
+        feat = feat.view(B, T, 256)           # [B,T,256]
 
-        # -------- Temporal pooling --------
+        # temporal pooling
+        feat = feat.mean(dim=1)               # [B,256]
+        feat = self.temporal_dropout(feat)
 
-        temporal_feat = feat.mean(dim=1)   # [B, 256]
-        temporal_feat = self.temporal_dropout(temporal_feat)
+        shared = self.shared_fc(feat)         # [B,128]
 
-        # -------- Shared representation --------
+        # heads
+        phase_logits = self.phase_head(shared)     # [B,7]
 
-        shared = self.shared_fc(temporal_feat)   # [B, 128]
+        phase_remain = self.remain_head(shared)    # [B,1]
+        phase_remain = F.relu(phase_remain)        # 防负时间
 
-        # -------- Outputs --------
-
-        remaining_time = self.remaining_head(shared).squeeze(1)
-
-        future_start = self.future_start_head(shared)
-        future_end   = self.future_end_head(shared)
-
-        phase_logits = self.future_phase_head(shared)
-        phase_logits = phase_logits.view(
-            B, self.max_future_events, self.num_phase_types
-        )
-
-        return remaining_time, future_start, future_end, phase_logits
-
+        return phase_logits, phase_remain.squeeze(1)
 
 class TaskA_CNN_LSTM(nn.Module):
     """
