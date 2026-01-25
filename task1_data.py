@@ -95,7 +95,7 @@ class Cholec80DatasetTaskA(Dataset):
             stage_durations.append(cur_len)
 
             while len(stage_order) < 7:
-                stage_order.append(-1)
+                stage_order.append(0)
             ## build samples
             video_folder = os.path.join(self.frames_root, video_name)
 
@@ -137,7 +137,6 @@ class Cholec80DatasetTaskA(Dataset):
                 while phase_start_idx > 0 and phase_ids[phase_start_idx-1] == cur_phase:
                     phase_start_idx -= 1
 
-
                 offset_in_phase = end_idx - phase_start_idx
 
                 current_time = sum(stage_durations[:stage_pos]) + offset_in_phase
@@ -160,7 +159,8 @@ class Cholec80DatasetTaskA(Dataset):
                 self.samples.append({
                     "frames": clip_frame_paths,
                     "stage_order": stage_order,   # 已 padding 到 7
-                    "time": time_list
+                    "time": time_list,
+                    "all_time": stage_durations
                 })
         print(f"[{self.mode}] samples:", len(self.samples))
 
@@ -198,6 +198,7 @@ class Cholec80DatasetTaskA(Dataset):
         frame_paths = sample["frames"]
         stage_order = sample["stage_order"]
         time_list = sample["time"]
+        all_time = sample["all_time"]
 
         frames = []
         for p in frame_paths:
@@ -212,16 +213,30 @@ class Cholec80DatasetTaskA(Dataset):
 
         frames = torch.stack(frames, dim=0)  # [8,3,H,W]
 
+        ratio_list = []
+
+        for r, t in zip(time_list, all_time):
+            ratio = r / t
+            ratio = min(max(ratio, 0.0), 1.0)
+            ratio_list.append(ratio)
+
         if len(stage_order) == 6:
             stage_order.append(0)        # padding
-        if len(time_list) == 6:
-            time_list.append(0.0)
+        if len(ratio_list) == 6:
+            ratio_list.append(0.0)
+        if len(all_time) == 6:
+            all_time.append(0.0)
 
         return (
             frames,
             torch.tensor(stage_order, dtype=torch.long),
-            torch.tensor(time_list, dtype=torch.float32)
+            torch.tensor(ratio_list, dtype=torch.float32),
+            torch.tensor(all_time, dtype=torch.float32)
         )
+    # frames 是图片的集合
+    # stage_order 是阶段顺序,告诉模型都有哪个阶段
+    # ratio_list 是各阶段剩余时间比例
+    # all_time 是各阶段总时间
 
 
 
@@ -232,8 +247,9 @@ if __name__ == "__main__":
         mode="train"
     )
 
-    frames, stage_order, time_list = dataset[0]
+    frames, stage_order, ratio_list, all_time = dataset[50]
 
     print("Image shape:", frames.shape)
     print("Label shape:", stage_order)
-    print("Time list:", time_list)
+    print("Time list:", ratio_list)
+    print("All time:", all_time)

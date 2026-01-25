@@ -10,28 +10,27 @@ import logging
 
 from task1_data import Cholec80DatasetTaskA
 from task1_model import TaskA_CNN, TaskA_CNN_LSTM
+
 import numpy as np
 from sklearn.metrics import r2_score
-
-import numpy as np
 import matplotlib.pyplot as plt
 import json
-
-# from models.cnn_lstm import 
 
 
 # -------------------------------------------------
 # Argument Parser
+# -------------------------------------------------
+
 def parse_args():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--name", type=str,required=True)
-    parser.add_argument("--epochs", type=int,required=True)
+    parser.add_argument("--name", type=str, required=True)
+    parser.add_argument("--epochs", type=int, required=True)
 
     parser.add_argument("--model", type=str, required=True, choices=["cnn", "cnn_lstm"])
 
-    parser.add_argument("--data_root", type=str,default="data/cholec80")
+    parser.add_argument("--data_root", type=str, default="data/cholec80")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=1e-4)
 
@@ -46,9 +45,15 @@ def parse_args():
 
     return parser.parse_args()
 
+
+# -------------------------------------------------
+# Utils
+# -------------------------------------------------
+
 def save_config(args, save_path):
     with open(save_path, "w") as f:
         json.dump(vars(args), f, indent=4)
+
 
 def set_seed(seed):
 
@@ -61,10 +66,9 @@ def set_seed(seed):
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-
-    # Ensure deterministic behavior
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
 
 def setup_logger(log_dir):
 
@@ -73,28 +77,28 @@ def setup_logger(log_dir):
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
 
-    # Clear duplicated handlers (important when re-running)
     if logger.hasHandlers():
         logger.handlers.clear()
 
-    # -------- File Handler --------
     file_handler = logging.FileHandler(log_file)
     file_formatter = logging.Formatter(
         "%(asctime)s | %(levelname)s | %(message)s"
     )
     file_handler.setFormatter(file_formatter)
 
-    # -------- Console Handler --------
     console_handler = logging.StreamHandler()
-    console_formatter = logging.Formatter(
-        "%(message)s"
-    )
+    console_formatter = logging.Formatter("%(message)s")
     console_handler.setFormatter(console_formatter)
 
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
 
     return logger
+
+
+# -------------------------------------------------
+# Build model
+# -------------------------------------------------
 
 def build_model(model_name):
 
@@ -104,6 +108,12 @@ def build_model(model_name):
     elif model_name == "cnn_lstm":
         return TaskA_CNN_LSTM()
 
+
+# -------------------------------------------------
+# Validation (ratio version + masked acc)
+# -------------------------------------------------
+
+@torch.no_grad()
 def validate_phase_and_remain(model, loader, device):
 
     model.eval()
@@ -111,75 +121,72 @@ def validate_phase_and_remain(model, loader, device):
     total_correct = 0
     total_num = 0
 
-    preds_time = []
-    gts_time = []
+    preds_ratio = []
+    gts_ratio = []
 
-    with torch.no_grad():
+    for frames, stage_order, ratio_list, all_time in loader:
 
-        for frames, stage_order, time_list in loader:
+        frames = frames.to(device)
+        stage_order = stage_order.to(device)
+        ratio_list = ratio_list.to(device)
 
-            frames = frames.to(device)
-            stage_order = stage_order.to(device)
-            time_list = time_list.to(device)
+        # current stage index
+        mask = (ratio_list > 0)
+        cur_stage_idx = mask.float().argmax(dim=1)
 
-            cur_stage_idx = (time_list > 0).float().argmax(dim=1)
+        phase_gt = stage_order.gather(
+            1, cur_stage_idx.unsqueeze(1)
+        ).squeeze(1)
 
-            phase_gt = stage_order.gather(
-                1,
-                cur_stage_idx.unsqueeze(1)
-            ).squeeze(1)
+        phase_remain_gt = ratio_list.gather(
+            1, cur_stage_idx.unsqueeze(1)
+        ).squeeze(1)
 
-            phase_remain_gt = time_list.gather(
-                1,
-                cur_stage_idx.unsqueeze(1)
-            ).squeeze(1)
+        pred_phase_logits, pred_phase_remain = model(frames)
 
-            pred_phase_logits, pred_phase_remain = model(frames)
+        pred_phase_remain = torch.clamp(pred_phase_remain, 0.0, 1.0)
 
-            pred_phase = torch.argmax(pred_phase_logits, dim=1)
+        pred_phase = torch.argmax(pred_phase_logits, dim=1)
 
-            total_correct += (pred_phase == phase_gt).sum().item()
-            total_num += phase_gt.size(0)
+        valid = (phase_gt != 0)
 
-            preds_time.append(pred_phase_remain.cpu().numpy())
-            gts_time.append(phase_remain_gt.cpu().numpy())
+        total_correct += ((pred_phase == phase_gt) & valid).sum().item()
+        total_num += valid.sum().item()
 
-    acc = total_correct / total_num
+        preds_ratio.append(pred_phase_remain.cpu().numpy())
+        gts_ratio.append(phase_remain_gt.cpu().numpy())
 
-    preds_time = np.concatenate(preds_time)
-    gts_time = np.concatenate(gts_time)
+    acc = total_correct / max(total_num, 1)
 
-    mae = np.mean(np.abs(preds_time - gts_time))
-    r2 = r2_score(gts_time, preds_time)
+    preds_ratio = np.concatenate(preds_ratio)
+    gts_ratio = np.concatenate(gts_ratio)
 
-    return acc, mae, r2
+    mae_ratio = np.mean(np.abs(preds_ratio - gts_ratio))
+    r2_ratio = r2_score(gts_ratio, preds_ratio)
 
-# Main training
+    return acc, mae_ratio, r2_ratio
+
+
+# -------------------------------------------------
+# Main
+# -------------------------------------------------
+
 def main():
-
-    # ---------------- Parse args ----------------
 
     args = parse_args()
     set_seed(args.seed)
 
     print("Random seed:", args.seed)
 
-    # ---------------- Experiment folder ----------------
-
-    exp_dir = os.path.join("checkpoints", args.name)
+    exp_dir = os.path.join(args.save_dir, args.name)
     os.makedirs(exp_dir, exist_ok=True)
 
     logger = setup_logger(exp_dir)
-
     save_config(args, os.path.join(exp_dir, "config.json"))
 
     best_ckpt_path = os.path.join(exp_dir, "best.pth")
 
-    # ---------------- Device ----------------
-
-    device = torch.device(
-        args.device if torch.cuda.is_available() else "cpu"
-    )
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
     logger.info(f"Experiment: {args.name}")
     logger.info(f"Device: {device}")
@@ -216,8 +223,6 @@ def main():
         transform=transform,
     )
 
-    # ---------------- DataLoader ----------------
-
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
@@ -238,7 +243,7 @@ def main():
     logger.info(f"Train samples: {len(train_dataset)}")
     logger.info(f"Val samples: {len(val_dataset)}")
 
-    # ---------------- Build Model ----------------
+    # ---------------- Model ----------------
 
     model = build_model(args.model).to(device)
 
@@ -247,10 +252,11 @@ def main():
         lr=args.lr
     )
 
-    lambda_phase = 1.0
-    lambda_remain = 0.5
+    # ---------------- Loss ----------------
 
-    # ---------- Loss functions ----------
+    lambda_phase = 1.0
+    lambda_remain = 0.2
+
     criterion_phase = torch.nn.CrossEntropyLoss(ignore_index=0)
     criterion_remain = torch.nn.SmoothL1Loss()
 
@@ -258,15 +264,15 @@ def main():
 
     train_loss_curve = []
     val_mae_curve = []
-    val_r2_curve = []
 
     # ==========================================================
-    #                      Training Loop
+    # Training Loop
     # ==========================================================
 
     for epoch in range(args.epochs):
 
         model.train()
+
         running_loss = 0.0
         running_phase_acc = 0.0
         running_mae = 0.0
@@ -275,44 +281,32 @@ def main():
 
         for step, batch in enumerate(pbar):
 
-            # ==================================================
-            #                Load batch
-            # ==================================================
-
-            frames, stage_order, time_list = batch
+            frames, stage_order, ratio_list, all_time = batch
 
             frames = frames.to(device)
             stage_order = stage_order.to(device)
-            time_list = time_list.to(device)
+            ratio_list = ratio_list.to(device)
 
-            # ==================================================
-            #       Extract GT phase + phase remaining
-            # ==================================================
+            # ---------------- current stage ----------------
 
-            # 当前阶段 index
-            cur_stage_idx = (time_list > 0).float().argmax(dim=1)
+            mask = (ratio_list > 0)
+            cur_stage_idx = mask.float().argmax(dim=1)
 
-            # 当前阶段 GT label
             phase_gt = stage_order.gather(
-                1,
-                cur_stage_idx.unsqueeze(1)
+                1, cur_stage_idx.unsqueeze(1)
             ).squeeze(1).long()
 
-            # 当前阶段剩余时间 GT
-            phase_remain_gt = time_list.gather(
-                1,
-                cur_stage_idx.unsqueeze(1)
+            phase_remain_gt = ratio_list.gather(
+                1, cur_stage_idx.unsqueeze(1)
             ).squeeze(1)
 
-            # ==================================================
-            #                 Forward
-            # ==================================================
+            # ---------------- forward ----------------
 
             pred_phase_logits, pred_phase_remain = model(frames)
 
-            # ==================================================
-            #                  Loss
-            # ==================================================
+            pred_phase_remain = torch.clamp(pred_phase_remain, 0.0, 1.0)
+
+            # ---------------- loss ----------------
 
             loss_phase = criterion_phase(pred_phase_logits, phase_gt)
             loss_remain = criterion_remain(pred_phase_remain, phase_remain_gt)
@@ -322,23 +316,21 @@ def main():
                 lambda_remain * loss_remain
             )
 
-            # ==================================================
-            #                Backprop
-            # ==================================================
+            # ---------------- backprop ----------------
 
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
 
-            # ==================================================
-            #                 Metrics
-            # ==================================================
+            # ---------------- metrics ----------------
 
             with torch.no_grad():
 
                 pred_phase = torch.argmax(pred_phase_logits, dim=1)
 
-                phase_acc = (pred_phase == phase_gt).float().mean()
+                valid = (phase_gt != 0)
+
+                phase_acc = ((pred_phase == phase_gt) & valid).float().sum() / valid.float().sum().clamp(min=1)
 
                 mae = torch.abs(
                     pred_phase_remain - phase_remain_gt
@@ -351,12 +343,10 @@ def main():
             pbar.set_postfix(
                 loss=f"{total_loss.item():.3f}",
                 acc=f"{phase_acc.item():.2f}",
-                mae=f"{mae.item():.1f}s"
+                mae=f"{mae.item():.3f}"
             )
 
-        # ==================================================
-        #              Epoch summary
-        # ==================================================
+        # ---------------- epoch summary ----------------
 
         avg_loss = running_loss / len(train_loader)
         avg_acc = running_phase_acc / len(train_loader)
@@ -368,12 +358,10 @@ def main():
             f"Epoch {epoch+1} "
             f"Train Loss: {avg_loss:.3f} | "
             f"Phase Acc: {avg_acc:.3f} | "
-            f"Remain MAE: {avg_mae:.2f}s"
+            f"Remain MAE (ratio): {avg_mae:.4f}"
         )
 
-        # ==================================================
-        #                Validation
-        # ==================================================
+        # ---------------- validation ----------------
 
         val_acc, val_mae, val_r2 = validate_phase_and_remain(
             model,
@@ -381,16 +369,16 @@ def main():
             device
         )
 
+        val_mae_curve.append(val_mae)
+
         logger.info(
             f"Epoch {epoch+1} "
             f"Val Phase Acc: {val_acc:.3f} | "
-            f"Remain MAE: {val_mae:.2f}s | "
+            f"Remain MAE (ratio): {val_mae:.4f} | "
             f"R2: {val_r2:.4f}"
         )
 
-        # ==================================================
-        #                Save Best
-        # ==================================================
+        # ---------------- save best ----------------
 
         if val_mae < best_mae:
 
@@ -407,18 +395,18 @@ def main():
             logger.info("Saved new best checkpoint")
 
     # ==========================================================
-    #                  Training finished
+    # Training finished
     # ==========================================================
 
     logger.info("Training completed.")
-    logger.info(f"Best Val MAE: {best_mae:.2f}s")
+    logger.info(f"Best Val MAE (ratio): {best_mae:.4f}")
 
-    # ---------------- Plot curves ----------------
+    # ---------------- plot curves ----------------
 
     plt.figure(figsize=(8, 5))
 
     plt.plot(train_loss_curve, label="Train Loss")
-    plt.plot(val_mae_curve, label="Val MAE")
+    plt.plot(val_mae_curve, label="Val MAE (ratio)")
 
     plt.xlabel("Epoch")
     plt.ylabel("Value")
