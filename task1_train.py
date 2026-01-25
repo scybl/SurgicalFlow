@@ -251,7 +251,7 @@ def main():
     lambda_remain = 0.5
 
     # ---------- Loss functions ----------
-    criterion_phase = torch.nn.CrossEntropyLoss()
+    criterion_phase = torch.nn.CrossEntropyLoss(ignore_index=0)
     criterion_remain = torch.nn.SmoothL1Loss()
 
     best_mae = float("inf")

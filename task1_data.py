@@ -7,13 +7,13 @@ from PIL import Image
 FPS_ORI = 25
 
 PHASE2ID = {
-    "Preparation": 0,
-    "CalotTriangleDissection": 1,
-    "ClippingCutting": 2,
-    "GallbladderDissection": 3,
-    "GallbladderPackaging": 4,
-    "CleaningCoagulation": 5,
-    "GallbladderRetraction": 6
+    "Preparation": 1,
+    "CalotTriangleDissection": 2,
+    "ClippingCutting": 3,
+    "GallbladderDissection": 4,
+    "GallbladderPackaging": 5,
+    "CleaningCoagulation": 6,
+    "GallbladderRetraction": 7
 }
 
 
@@ -211,6 +211,11 @@ class Cholec80DatasetTaskA(Dataset):
             frames.append(img)
 
         frames = torch.stack(frames, dim=0)  # [8,3,H,W]
+
+        if len(stage_order) == 6:
+            stage_order.append(0)        # padding
+        if len(time_list) == 6:
+            time_list.append(0.0)
 
         return (
             frames,

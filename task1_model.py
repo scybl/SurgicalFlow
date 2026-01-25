@@ -66,7 +66,7 @@ class TaskA_CNN(nn.Module):
         # ---------------- Heads ----------------
 
         # phase classification
-        self.phase_head = nn.Linear(128, num_phases)
+        self.phase_head = nn.Linear(128, num_phases+1) # 添加无效类
 
         # phase remaining regression
         self.remain_head = nn.Linear(128, 1)
