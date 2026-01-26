@@ -96,31 +96,30 @@ class TaskA_CNN(nn.Module):
 
         return phase_logits, phase_remain.squeeze(1)
 
+
 class TaskA_CNN_LSTM(nn.Module):
     """
-    MPHY0043 Task A compliant model
+    Multi-task:
+      - Phase classification
+      - Phase remaining time regression
 
     Input:
         frames: [B, T, 3, H, W]
 
     Output:
-        remaining_time:      [B]
-        future_start_times:  [B, N]
-        future_end_times:    [B, N]
-        future_phase_logits: [B, N, K]
+        phase_logits: [B,7]
+        phase_remain: [B]
     """
 
     def __init__(
         self,
-        num_phase_types=7,
-        max_future_events=10,
+        num_phases=7,
         lstm_hidden=256,
+        lstm_layers=1,
+        bidirectional=False,
         dropout=0.3
     ):
         super().__init__()
-
-        self.num_phase_types = num_phase_types
-        self.max_future_events = max_future_events
 
         # ---------------- CNN Backbone ----------------
 
@@ -149,76 +148,66 @@ class TaskA_CNN_LSTM(nn.Module):
 
         self.gap = nn.AdaptiveAvgPool2d((1, 1))
 
-        # ---------------- Temporal Model ----------------
+        # ---------------- Temporal Modeling ----------------
 
         self.lstm = nn.LSTM(
             input_size=256,
             hidden_size=lstm_hidden,
-            num_layers=1,
-            batch_first=True
+            num_layers=lstm_layers,
+            batch_first=True,
+            bidirectional=bidirectional
         )
 
-        # ---------------- Shared FC ----------------
+        lstm_out_dim = lstm_hidden * (2 if bidirectional else 1)
+
+        self.temporal_dropout = nn.Dropout(dropout)
+
+        # ---------------- Shared Representation ----------------
 
         self.shared_fc = nn.Sequential(
-            nn.Linear(lstm_hidden, 128),
+            nn.Linear(lstm_out_dim, 128),
             nn.ReLU(inplace=True),
             nn.Dropout(dropout)
         )
 
-        # ---------------- Output Heads ----------------
+        # ---------------- Heads ----------------
 
-        # Remaining time regression
-        self.remaining_head = nn.Linear(128, 1)
+        # phase classification
+        self.phase_head = nn.Linear(128, num_phases + 1)
 
-        # Future phase event timeline regression
-        self.future_start_head = nn.Linear(128, max_future_events)
-        self.future_end_head   = nn.Linear(128, max_future_events)
-
-        # Future phase classification
-        self.future_phase_head = nn.Linear(
-            128, max_future_events * num_phase_types
-        )
+        # phase remaining regression
+        self.remain_head = nn.Linear(128, 1)
 
     def forward(self, frames):
-        """
-        frames: [B, T, 3, H, W]
-        """
 
         B, T, C, H, W = frames.shape
 
-        # -------- CNN feature extraction per frame --------
+        # ---------- CNN per frame ----------
 
         x = frames.view(B * T, C, H, W)
 
         feat = self.backbone(x)
-        feat = self.gap(feat)                 # [B*T, 256, 1, 1]
-        feat = feat.view(B, T, -1)            # [B, T, 256]
+        feat = self.gap(feat)                 # [B*T,256,1,1]
+        feat = feat.view(B, T, 256)           # [B,T,256]
 
-        # -------- Temporal modeling --------
+        # ---------- LSTM temporal modeling ----------
 
-        lstm_out, _ = self.lstm(feat)
+        lstm_out, _ = self.lstm(feat)         # [B,T,H]
 
-        # Use last time step feature
-        temporal_feat = lstm_out[:, -1, :]    # [B, H]
+        # use last timestep (causal, online friendly)
+        temporal_feat = lstm_out[:, -1, :]    # [B,H]
 
-        # -------- Shared representation --------
+        temporal_feat = self.temporal_dropout(temporal_feat)
 
-        shared = self.shared_fc(temporal_feat)  # [B, 128]
+        # ---------- Shared FC ----------
 
-        # -------- Outputs --------
+        shared = self.shared_fc(temporal_feat)   # [B,128]
 
-        # Remaining phase time
-        remaining_time = self.remaining_head(shared).squeeze(1)
+        # ---------- Heads ----------
 
-        # Future phase timeline
-        future_start = self.future_start_head(shared)
-        future_end   = self.future_end_head(shared)
+        phase_logits = self.phase_head(shared)   # [B,num_phases+1]
 
-        # Future phase classification
-        phase_logits = self.future_phase_head(shared)
-        phase_logits = phase_logits.view(
-            B, self.max_future_events, self.num_phase_types
-        )
+        phase_remain = self.remain_head(shared)  # [B,1]
+        phase_remain = F.relu(phase_remain)      # avoid negative time
 
-        return remaining_time, future_start, future_end, phase_logits
+        return phase_logits, phase_remain.squeeze(1)

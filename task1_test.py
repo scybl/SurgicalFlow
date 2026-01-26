@@ -3,33 +3,93 @@ import argparse
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from tqdm import tqdm
-import numpy as np
+import random
+import logging
 import json
+import numpy as np
+from sklearn.metrics import r2_score
+from tqdm import tqdm
 
 from task1_data import Cholec80DatasetTaskA
 from task1_model import TaskA_CNN, TaskA_CNN_LSTM
 
-import matplotlib.pyplot as plt
+
+# -------------------------------------------------
+# Argument Parser (IDENTICAL to train)
+# -------------------------------------------------
 
 def parse_args():
+
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--ckpt", type=str, required=True)
+    parser.add_argument("--name", type=str, required=True)
+
     parser.add_argument("--model", type=str, required=True, choices=["cnn", "cnn_lstm"])
 
     parser.add_argument("--data_root", type=str, default="data/cholec80")
     parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--num_workers", type=int, default=8)
+    parser.add_argument("--lr", type=float, default=1e-4)      # unused, kept for consistency
 
     parser.add_argument("--seq_len", type=int, default=16)
     parser.add_argument("--stride", type=int, default=8)
 
+    parser.add_argument("--num_workers", type=int, default=8)
+    parser.add_argument("--save_dir", type=str, default="checkpoints")
+
     parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--seed", type=int, default=42)
 
     return parser.parse_args()
 
 
+# -------------------------------------------------
+# Utils (SAME AS TRAIN)
+# -------------------------------------------------
+
+def set_seed(seed):
+
+    random.seed(seed)
+    np.random.seed(seed)
+
+    torch.manual_seed(seed)
+
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+def setup_logger(log_dir):
+
+    log_file = os.path.join(log_dir, "test.log")
+
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    file_handler = logging.FileHandler(log_file)
+    file_formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(message)s"
+    )
+    file_handler.setFormatter(file_formatter)
+
+    console_handler = logging.StreamHandler()
+    console_formatter = logging.Formatter("%(message)s")
+    console_handler.setFormatter(console_formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    return logger
+
+
+# -------------------------------------------------
+# Build model
+# -------------------------------------------------
 
 def build_model(model_name):
 
@@ -40,89 +100,87 @@ def build_model(model_name):
         return TaskA_CNN_LSTM()
 
 
+# -------------------------------------------------
+# Validation (IDENTICAL TO TRAIN)
+# -------------------------------------------------
 
 @torch.no_grad()
-def run_test(model, loader, device):
+def validate_phase_and_remain(model, loader, device):
 
     model.eval()
-
-    gt_all = []
-    pred_all = []
 
     total_correct = 0
     total_num = 0
 
-    for frames, stage_order, time_list in tqdm(loader, desc="Test"):
+    preds_ratio = []
+    gts_ratio = []
+
+    for frames, stage_order, ratio_list, all_time in tqdm(loader):
 
         frames = frames.to(device)
         stage_order = stage_order.to(device)
-        time_list = time_list.to(device)
+        ratio_list = ratio_list.to(device)
 
-        # ---------- 当前阶段 ----------
-        cur_stage_idx = (time_list > 0).float().argmax(dim=1)
+        # current stage index
+        mask = (ratio_list > 0)
+        cur_stage_idx = mask.float().argmax(dim=1)
 
         phase_gt = stage_order.gather(
             1, cur_stage_idx.unsqueeze(1)
         ).squeeze(1)
 
-        phase_remain_gt = time_list.gather(
+        phase_remain_gt = ratio_list.gather(
             1, cur_stage_idx.unsqueeze(1)
         ).squeeze(1)
 
-        # ---------- Forward ----------
         pred_phase_logits, pred_phase_remain = model(frames)
 
-        # ---------- Phase acc ----------
+        pred_phase_remain = torch.clamp(pred_phase_remain, 0.0, 1.0)
+
         pred_phase = torch.argmax(pred_phase_logits, dim=1)
 
-        total_correct += (pred_phase == phase_gt).sum().item()
-        total_num += phase_gt.size(0)
+        valid = (phase_gt != 0)
 
-        # ---------- Collect ----------
-        gt_all.append(phase_remain_gt.cpu().numpy())
-        pred_all.append(pred_phase_remain.cpu().numpy())
+        total_correct += ((pred_phase == phase_gt) & valid).sum().item()
+        total_num += valid.sum().item()
 
-    gt = np.concatenate(gt_all)
-    pred = np.concatenate(pred_all)
+        preds_ratio.append(pred_phase_remain.cpu().numpy())
+        gts_ratio.append(phase_remain_gt.cpu().numpy())
 
-    err = pred - gt
+    acc = total_correct / max(total_num, 1)
 
-    mae = float(np.mean(np.abs(err)))
-    rmse = float(np.sqrt(np.mean(err ** 2)))
+    preds_ratio = np.concatenate(preds_ratio)
+    gts_ratio = np.concatenate(gts_ratio)
 
-    ss_res = float(np.sum((gt - pred) ** 2))
-    ss_tot = float(np.sum((gt - np.mean(gt)) ** 2))
+    mae_ratio = np.mean(np.abs(preds_ratio - gts_ratio))
+    r2_ratio = r2_score(gts_ratio, preds_ratio)
 
-    r2 = float("nan") if ss_tot == 0 else float(1.0 - ss_res / ss_tot)
-
-    phase_acc = total_correct / total_num
-
-    metrics = {
-        "phase_acc": phase_acc,
-        "remain_mae_sec": mae,
-        "remain_rmse_sec": rmse,
-        "remain_r2": r2,
-        "remain_mae_min": mae / 60,
-        "remain_rmse_min": rmse / 60,
-        "n_samples": int(len(gt))
-    }
-
-    return gt, pred, metrics
+    return acc, mae_ratio, r2_ratio
 
 
-# ------------------------
+# -------------------------------------------------
 # Main
-# ------------------------
+# -------------------------------------------------
 
 def main():
 
     args = parse_args()
+    set_seed(args.seed)
 
-    device = torch.device(
-        args.device if torch.cuda.is_available() else "cpu"
-    )
+    exp_dir = os.path.join(args.save_dir, args.name)
+    os.makedirs(exp_dir, exist_ok=True)
 
-    # ---------- Transform (必须和 train 一致) ----------
+    logger = setup_logger(exp_dir)
+
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+
+    logger.info("========== TEST MODE ==========")
+    logger.info(f"Experiment: {args.name}")
+    logger.info(f"Device: {device}")
+    logger.info(f"Model: {args.model}")
+    logger.info(f"Batch size: {args.batch_size}")
+
+    # ---------------- Transform (SAME AS TRAIN) ----------------
 
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
@@ -133,7 +191,7 @@ def main():
         ),
     ])
 
-    # ---------- Dataset ----------
+    # ---------------- Dataset ----------------
 
     test_dataset = Cholec80DatasetTaskA(
         root_dir=args.data_root,
@@ -148,84 +206,54 @@ def main():
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
-        pin_memory=(device.type == "cuda")
+        pin_memory=(device.type == "cuda"),
     )
 
-    print("Test samples:", len(test_dataset))
+    logger.info(f"Test samples: {len(test_dataset)}")
 
-    # ---------- Load model ----------
+    # ---------------- Load model ----------------
 
     model = build_model(args.model).to(device)
 
-    ckpt = torch.load(args.ckpt, map_location=device)
-    model.load_state_dict(ckpt["state_dict"])
+    ckpt_path = os.path.join(exp_dir, "best.pth")
 
-    print("Loaded checkpoint:", args.ckpt)
+    if not os.path.exists(ckpt_path):
+        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
-    # ---------- Run test ----------
+    checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
 
-    gt, pred, metrics = run_test(model, test_loader, device)
+    model.load_state_dict(checkpoint["state_dict"])
 
+    logger.info(f"Loaded checkpoint from: {ckpt_path}")
+    logger.info(f"Best Val MAE (ratio): {checkpoint['best_mae']:.4f}")
 
-    print("\n====== Test Results ======")
-    for k, v in metrics.items():
-        print(f"{k}: {v}")
+    # ---------------- Test ----------------
 
-    # ---------- Save ----------
-
-    save_path = os.path.join(
-        os.path.dirname(args.ckpt),
-        "test_metrics.json"
+    test_acc, test_mae, test_r2 = validate_phase_and_remain(
+        model,
+        test_loader,
+        device
     )
 
-    with open(save_path, "w") as f:
-        json.dump(metrics, f, indent=4)
+    logger.info("========== TEST RESULT ==========")
+    logger.info(f"Phase Acc: {test_acc:.4f}")
+    logger.info(f"Remain MAE (ratio): {test_mae:.4f}")
+    logger.info(f"R2: {test_r2:.4f}")
 
-    print("Saved metrics to:", save_path)
+    # ---------------- Save result ----------------
 
-    save_dir = os.path.dirname(args.ckpt)
+    result_dict = {
+        "phase_acc": float(test_acc),
+        "mae_ratio": float(test_mae),
+        "r2": float(test_r2)
+    }
 
-    # ---------------- Scatter plot ----------------
+    result_path = os.path.join(exp_dir, "test_result.json")
 
-    plt.figure(figsize=(6, 6))
+    with open(result_path, "w") as f:
+        json.dump(result_dict, f, indent=4)
 
-    plt.scatter(gt, pred, s=8, alpha=0.5)
-
-    max_val = max(gt.max(), pred.max())
-    plt.plot([0, max_val], [0, max_val], linestyle="--")  # y=x reference
-
-    plt.xlabel("GT Remaining Time (sec)")
-    plt.ylabel("Predicted Remaining Time (sec)")
-    plt.title(f"Remaining Time Prediction\nR2={metrics['remain_r2']:.3f}")
-
-    plt.grid(True)
-
-    scatter_path = os.path.join(save_dir, "test_scatter.png")
-    plt.savefig(scatter_path, dpi=150, bbox_inches="tight")
-    plt.close()
-
-    print("Saved scatter plot:", scatter_path)
-
-
-    # ---------------- Error histogram ----------------
-
-    error = pred - gt
-
-    plt.figure(figsize=(7, 4))
-
-    plt.hist(error, bins=60)
-
-    plt.xlabel("Prediction Error (sec)")
-    plt.ylabel("Count")
-    plt.title("Remaining Time Error Distribution")
-
-    plt.grid(True)
-
-    hist_path = os.path.join(save_dir, "test_error_hist.png")
-    plt.savefig(hist_path, dpi=150, bbox_inches="tight")
-    plt.close()
-
-    print("Saved error histogram:", hist_path)
+    logger.info(f"Test results saved to: {result_path}")
 
 
 if __name__ == "__main__":
