@@ -11,7 +11,7 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-from task1_data_loader import Cholec80DatasetTaskA
+from task2_data_loader import Cholec80DatasetTaskB
 from model_out_head import ToolPredictionModel
 
 
@@ -129,7 +129,7 @@ def main():
 
     # ---------------- Dataset ----------------
 
-    train_dataset = Cholec80DatasetTaskA(
+    train_dataset = Cholec80DatasetTaskB(
         root_dir=args.data_root,
         mode="train",
         seq_len=args.seq_len,
@@ -137,7 +137,7 @@ def main():
         transform=transform
     )
 
-    val_dataset = Cholec80DatasetTaskA(
+    val_dataset = Cholec80DatasetTaskB(
         root_dir=args.data_root,
         mode="val",
         seq_len=args.seq_len,

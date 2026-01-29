@@ -19,7 +19,7 @@ PHASE2ID = {
 NUM_TOOLS = 7
 
 
-class Cholec80DatasetTaskA(Dataset):
+class Cholec80DatasetTaskB(Dataset):
     def __init__(
         self,
         root_dir,
@@ -120,7 +120,7 @@ class Cholec80DatasetTaskA(Dataset):
             tool_path = os.path.join(self.tool_dir, f"{video_name}-tool.txt")
 
             with open(tool_path, "r") as f:
-                tool_lines = f.readlines()[1::FPS_ORI]
+                tool_lines = f.readlines()[1::]
 
             tool_labels = []
 
@@ -259,7 +259,7 @@ class Cholec80DatasetTaskA(Dataset):
 
 if __name__ == "__main__":
 
-    dataset = Cholec80DatasetTaskA(
+    dataset = Cholec80DatasetTaskB(
         root_dir="data/cholec80",
         mode="train"
     )

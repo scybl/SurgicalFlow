@@ -26,14 +26,12 @@ class Cholec80DatasetTaskA(Dataset):
         stride=8,
         transform=None,
         frames_dirname="frames",
-        phase_dirname="phase_annotations",
-        tool_dirname="tool_annotations"
+        phase_dirname="phase_annotations"
     ):
 
         self.root_dir = root_dir
         self.frames_root = os.path.join(root_dir, frames_dirname)
         self.phase_dir = os.path.join(root_dir, phase_dirname)
-        self.tool_dir = os.path.join(root_dir, tool_dirname)
 
         self.seq_len = seq_len
         self.stride = stride
