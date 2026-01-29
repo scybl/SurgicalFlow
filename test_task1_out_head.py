@@ -112,6 +112,36 @@ def build_model(model_name):
 # Validation (IDENTICAL TO TRAIN)
 # -------------------------------------------------
 
+def build_gt_future(cur_stage_idx, ratio_list, stage_order, all_time):
+
+    B = cur_stage_idx.shape[0]
+
+    gt_future = torch.zeros((B, 7), device=cur_stage_idx.device)
+
+    for b in range(B):
+
+        cur = int(cur_stage_idx[b].item())
+
+        if cur == 0:
+            continue
+
+        idx = cur - 1
+
+        remain = ratio_list[b, idx] * all_time[b, idx]
+
+        acc = remain
+        gt_future[b, idx] = acc
+
+        for j in range(idx + 1, 7):
+
+            if stage_order[b, j] == 0:
+                continue
+
+            acc = acc + all_time[b, j]
+            gt_future[b, j] = acc
+
+    return gt_future
+
 @torch.no_grad()
 def validate_pipeline(backbone, head, loader, device):
 
@@ -121,8 +151,8 @@ def validate_pipeline(backbone, head, loader, device):
     total_correct = 0
     total_num = 0
 
-    preds_time = []
-    gts_time = []
+    preds_future_all = []
+    gts_future_all = []
 
     for frames, stage_order, ratio_list, all_time in tqdm(loader):
 
@@ -131,29 +161,24 @@ def validate_pipeline(backbone, head, loader, device):
         ratio_list = ratio_list.to(device)
         all_time = all_time.to(device)
 
-        # ---------------- current stage GT ----------------
+        # ======================================================
+        # Locate current stage (GT)
+        # ======================================================
 
         mask = (ratio_list > 0)
-        cur_stage_idx = mask.float().argmax(dim=1)
+        cur_stage_idx = mask.float().argmax(dim=1)   # [B] (0-based)
 
         phase_gt = stage_order.gather(
             1, cur_stage_idx.unsqueeze(1)
-        ).squeeze(1)
+        ).squeeze(1)   # [B]
 
-        ratio_gt = ratio_list.gather(
-            1, cur_stage_idx.unsqueeze(1)
-        ).squeeze(1)
-
-        phase_total_time = all_time.gather(
-            1, cur_stage_idx.unsqueeze(1)
-        ).squeeze(1)
-
-        # ---------------- backbone ----------------
+        # ======================================================
+        # Backbone forward
+        # ======================================================
 
         pred_phase_logits, pred_ratio = backbone(frames)
 
         pred_ratio = torch.clamp(pred_ratio, 0.0, 1.0)
-
         pred_phase = torch.argmax(pred_phase_logits, dim=1)
 
         valid = (phase_gt != 0)
@@ -161,33 +186,84 @@ def validate_pipeline(backbone, head, loader, device):
         total_correct += ((pred_phase == phase_gt) & valid).sum().item()
         total_num += valid.sum().item()
 
-        # ---------------- output head ----------------
-        # ⚠ 根据你 head 的 forward 接口修改
+        # ======================================================
+        # Output head forward
+        # ======================================================
 
-        pred_time = head(
+        # train 时你是 ratio_input shape = [B,1]
+        ratio_input = pred_ratio.unsqueeze(1)
+
+        pred_future = head(
             pred_phase,
-            pred_ratio,
+            ratio_input,
             stage_order,
             all_time
-        )
+        )   # [B,7]
 
-        # ---------------- GT time ----------------
+        # ======================================================
+        # GT future timeline
+        # ======================================================
 
-        gt_time = ratio_gt * phase_total_time
+        gt_future = build_gt_future(
+            cur_stage_idx,
+            ratio_list,
+            stage_order,
+            all_time
+        )   # [B,7]
 
-        preds_time.append(pred_time[valid].cpu().numpy())
-        gts_time.append(gt_time[valid].cpu().numpy())
+        # ======================================================
+        # Keep only valid samples
+        # ======================================================
+
+        pred_future_valid = pred_future[valid]   # [Nv,7]
+        gt_future_valid   = gt_future[valid]     # [Nv,7]
+
+        preds_future_all.append(pred_future_valid.cpu().numpy())
+        gts_future_all.append(gt_future_valid.cpu().numpy())
+
+    # ======================================================
+    # Merge all batches
+    # ======================================================
 
     acc = total_correct / max(total_num, 1)
 
-    preds_time = np.concatenate(preds_time)
-    gts_time = np.concatenate(gts_time)
+    preds_future = np.concatenate(preds_future_all, axis=0)   # [N,7]
+    gts_future   = np.concatenate(gts_future_all, axis=0)     # [N,7]
 
-    mae_time = np.mean(np.abs(preds_time - gts_time))
-    r2_time = r2_score(gts_time, preds_time)
+    # ======================================================
+    # END time MAE (future end timestamps)
+    # ======================================================
 
-    return acc, mae_time, r2_time
+    end_mask = (gts_future > 0)
 
+    end_mae = np.mean(
+        np.abs(preds_future[end_mask] - gts_future[end_mask])
+    )
+
+    # ======================================================
+    # START time MAE
+    # start(k) = end(k-1)
+    # ======================================================
+
+    pred_start = preds_future[:, 1:]   # [N,6]
+    gt_start   = gts_future[:, :-1]    # [N,6]
+
+    start_mask = (gt_start > 0)
+
+    start_mae = np.mean(
+        np.abs(pred_start[start_mask] - gt_start[start_mask])
+    )
+
+    # ======================================================
+    # R2 (flatten valid timeline points)
+    # ======================================================
+
+    r2_time = r2_score(
+        gts_future[end_mask],
+        preds_future[end_mask]
+    )
+
+    return acc, start_mae, end_mae, r2_time
 # -------------------------------------------------
 # Main
 # -------------------------------------------------
@@ -286,7 +362,7 @@ def main():
 
     # ---------------- Test ----------------
 
-    test_acc, test_mae, test_r2 = validate_pipeline(
+    test_acc, test_start_mae, test_end_mae, r2_score = validate_pipeline(
         backbone,
         out_head,
         test_loader,
@@ -296,15 +372,15 @@ def main():
 
     logger.info("========== TEST RESULT ==========")
     logger.info(f"Phase Acc: {test_acc:.4f}")
-    logger.info(f"Remain MAE (ratio): {test_mae:.4f}")
-    logger.info(f"R2: {test_r2:.4f}")
-
+    logger.info(f"Start MAE (s): {test_start_mae:.2f}")
+    logger.info(f"End MAE (s): {test_end_mae:.2f}")
     # ---------------- Save result ----------------
 
     result_dict = {
         "phase_acc": float(test_acc),
-        "mae_ratio": float(test_mae),
-        "r2": float(test_r2)
+        "start_mae": float(test_start_mae),
+        "end_mae": float(test_end_mae),
+        "r2_score": float(r2_score)
     }
 
     result_path = os.path.join(exp_dir, "test_result.json")
