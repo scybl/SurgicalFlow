@@ -1,13 +1,17 @@
 import os
 import argparse
 import torch
-import numpy as np
+import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
+import random
+import logging
+import json
+import numpy as np
+import matplotlib.pyplot as plt
 
 from task1_data import Cholec80DatasetTaskA
-from task1_model import TaskA_CNN, TaskA_CNN_LSTM
 from output_head import FutureTimelineModel
 
 
@@ -22,66 +26,90 @@ def parse_args():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--taska_ckpt", type=str, required=True)
-    parser.add_argument("--timeline_ckpt", type=str, required=True)
-
-    parser.add_argument("--model", type=str, default="cnn_lstm", choices=["cnn", "cnn_lstm"])
+    parser.add_argument("--name", type=str, required=True)
+    parser.add_argument("--epochs", type=int, required=True)
 
     parser.add_argument("--data_root", type=str, default="data/cholec80")
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--lr", type=float, default=1e-4)
 
-    parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--seq_len", type=int, default=16)
     parser.add_argument("--stride", type=int, default=8)
 
+    parser.add_argument("--num_workers", type=int, default=8)
+    parser.add_argument("--save_dir", type=str, default="checkpoints")
+
     parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--seed", type=int, default=42)
 
     return parser.parse_args()
 
 
 # -------------------------------------------------
-# Build models
+# Utils
 # -------------------------------------------------
 
-def build_taska(name):
+def save_config(args, save_path):
+    with open(save_path, "w") as f:
+        json.dump(vars(args), f, indent=4)
 
-    if name == "cnn":
-        return TaskA_CNN()
 
-    else:
-        return TaskA_CNN_LSTM()
+def set_seed(seed):
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+def setup_logger(log_dir):
+
+    log_file = os.path.join(log_dir, "train.log")
+
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    fh = logging.FileHandler(log_file)
+    ch = logging.StreamHandler()
+
+    fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    fh.setFormatter(fmt)
+    ch.setFormatter(logging.Formatter("%(message)s"))
+
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+
+    return logger
 
 
 # -------------------------------------------------
-# Timeline post-processing (industry standard)
-# -------------------------------------------------
-
-def post_process_timeline(raw, cur_stage_idx, stage_order):
-
-    # enforce monotonic
-    out, _ = torch.cummax(raw, dim=1)
-
-    # phase position mask
-    idx = cur_stage_idx.clamp(min=1) - 1
-
-    arange = torch.arange(out.shape[1], device=out.device).unsqueeze(0)
-
-    valid_mask = (arange >= idx.unsqueeze(1)).float()
-
-    out = out * valid_mask
-    out = out * stage_order
-
-    return out
-
-
-# -------------------------------------------------
-# Build GT timeline
+# Build GT timeline (NO constraint)
 # -------------------------------------------------
 
 def build_gt_future(cur_stage_idx, ratio_list, stage_order, all_time):
 
+    """
+    Build ground-truth cumulative future timeline
+
+    Output:
+        gt_future: [B,7]
+    """
+
     B = cur_stage_idx.shape[0]
 
-    gt_future = torch.zeros((B, NUM_PHASES), device=cur_stage_idx.device)
+    gt_future = torch.zeros(
+        (B, NUM_PHASES),
+        device=cur_stage_idx.device
+    )
 
     for b in range(B):
 
@@ -92,11 +120,13 @@ def build_gt_future(cur_stage_idx, ratio_list, stage_order, all_time):
 
         idx = cur - 1
 
+        # current stage remaining
         remain = ratio_list[b, idx] * all_time[b, idx]
 
         acc = remain
         gt_future[b, idx] = acc
 
+        # following stages
         for j in range(idx + 1, NUM_PHASES):
 
             if stage_order[b, j] == 0:
@@ -109,149 +139,30 @@ def build_gt_future(cur_stage_idx, ratio_list, stage_order, all_time):
 
 
 # -------------------------------------------------
-# Evaluation
-# -------------------------------------------------
-
-@torch.no_grad()
-def evaluate(taska, timeline, loader, device):
-
-    taska.eval()
-    timeline.eval()
-
-    total_correct = 0
-    total_num = 0
-
-    preds_remain = []
-    gts_remain = []
-
-    preds_start = []
-    gts_start = []
-
-    preds_end = []
-    gts_end = []
-
-    for batch in tqdm(loader):
-
-        frames, stage_order, ratio_list, all_time = batch
-
-        frames = frames.to(device)
-        stage_order = stage_order.to(device)
-        ratio_list = ratio_list.to(device)
-        all_time = all_time.to(device)
-
-        # ---------------- TaskA inference ----------------
-
-        phase_logits, pred_ratio = taska(frames)
-
-        pred_phase = torch.argmax(phase_logits, dim=1) + 1
-        pred_ratio = torch.clamp(pred_ratio, 0.0, 1.0)
-
-        # ---------------- Phase accuracy ----------------
-
-        mask = (ratio_list > 0)
-        cur_stage_gt = mask.float().argmax(dim=1) + 1
-
-        valid = (cur_stage_gt != 0)
-
-        total_correct += ((pred_phase == cur_stage_gt) & valid).sum().item()
-        total_num += valid.sum().item()
-
-        # ---------------- Timeline head ----------------
-
-        raw_future = timeline(
-            pred_phase,
-            pred_ratio.unsqueeze(1),
-            stage_order,
-            all_time
-        )
-
-        pred_future = post_process_timeline(
-            raw_future,
-            pred_phase,
-            stage_order
-        )
-
-        # ---------------- GT timeline ----------------
-
-        gt_future = build_gt_future(
-            cur_stage_gt,
-            ratio_list,
-            stage_order,
-            all_time
-        )
-
-        # ---------------- Metrics ----------------
-
-        B = pred_phase.shape[0]
-        batch_idx = torch.arange(B).to(device)
-
-        pred_idx = pred_phase - 1
-        gt_idx = cur_stage_gt - 1
-
-        pred_remain = pred_future[batch_idx, pred_idx]
-        gt_remain = gt_future[batch_idx, gt_idx]
-
-        pred_start = pred_future[batch_idx, pred_idx] - pred_remain
-        gt_start = gt_future[batch_idx, gt_idx] - gt_remain
-
-        pred_end = pred_future[batch_idx, pred_idx]
-        gt_end = gt_future[batch_idx, gt_idx]
-
-        valid_mask = valid
-
-        preds_remain.append(pred_remain[valid_mask].cpu().numpy())
-        gts_remain.append(gt_remain[valid_mask].cpu().numpy())
-
-        preds_start.append(pred_start[valid_mask].cpu().numpy())
-        gts_start.append(gt_start[valid_mask].cpu().numpy())
-
-        preds_end.append(pred_end[valid_mask].cpu().numpy())
-        gts_end.append(gt_end[valid_mask].cpu().numpy())
-
-    # ---------------- Aggregate ----------------
-
-    acc = total_correct / max(total_num, 1)
-
-    preds_remain = np.concatenate(preds_remain)
-    gts_remain = np.concatenate(gts_remain)
-
-    preds_start = np.concatenate(preds_start)
-    gts_start = np.concatenate(gts_start)
-
-    preds_end = np.concatenate(preds_end)
-    gts_end = np.concatenate(gts_end)
-
-    mae_remain = np.mean(np.abs(preds_remain - gts_remain))
-    mae_start = np.mean(np.abs(preds_start - gts_start))
-    mae_end = np.mean(np.abs(preds_end - gts_end))
-
-    return acc, mae_remain, mae_start, mae_end
-
-
-# -------------------------------------------------
 # Main
 # -------------------------------------------------
 
 def main():
 
     args = parse_args()
+    set_seed(args.seed)
+
+    exp_dir = os.path.join(args.save_dir, args.name)
+    os.makedirs(exp_dir, exist_ok=True)
+
+    logger = setup_logger(exp_dir)
+    save_config(args, os.path.join(exp_dir, "config.json"))
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-    # ---------------- Load models ----------------
+    best_ckpt_path = os.path.join(exp_dir, "best.pth")
 
-    taska = build_taska(args.model).to(device)
-    timeline = FutureTimelineModel().to(device)
+    logger.info(f"Experiment: {args.name}")
+    logger.info(f"Device: {device}")
+    logger.info(f"Epochs: {args.epochs}")
+    logger.info(f"Batch size: {args.batch_size}")
 
-    print("Loading TaskA:", args.taska_ckpt)
-    ckpt_a = torch.load(args.taska_ckpt, map_location=device)
-    taska.load_state_dict(ckpt_a["state_dict"])
-
-    print("Loading Timeline:", args.timeline_ckpt)
-    ckpt_t = torch.load(args.timeline_ckpt, map_location=device)
-    timeline.load_state_dict(ckpt_t["state_dict"])
-
-    # ---------------- Dataset ----------------
+    # ---------------- Transform ----------------
 
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
@@ -262,46 +173,207 @@ def main():
         ),
     ])
 
-    test_dataset = Cholec80DatasetTaskA(
+    # ---------------- Dataset ----------------
+
+    train_dataset = Cholec80DatasetTaskA(
         root_dir=args.data_root,
-        mode="test",
+        mode="train",
         seq_len=args.seq_len,
         stride=args.stride,
-        transform=transform
+        transform=transform,
     )
 
-    test_loader = DataLoader(
-        test_dataset,
+    val_dataset = Cholec80DatasetTaskA(
+        root_dir=args.data_root,
+        mode="val",
+        seq_len=args.seq_len,
+        stride=args.stride,
+        transform=transform,
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
         batch_size=args.batch_size,
-        shuffle=False
+        shuffle=True,
+        num_workers=args.num_workers,
+        drop_last=True
     )
 
-    print("Test samples:", len(test_dataset))
-
-    # ---------------- Evaluate ----------------
-
-    acc, mae_remain, mae_start, mae_end = evaluate(
-        taska,
-        timeline,
-        test_loader,
-        device
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=4
     )
 
-    # ---------------- Print ----------------
+    logger.info(f"Train samples: {len(train_dataset)}")
+    logger.info(f"Val samples: {len(val_dataset)}")
 
-    print("\n====== Final Evaluation ======")
-    print(f"Remain MAE (s): {mae_remain:.2f}")
-    print(f"Start  MAE (s): {mae_start:.2f}")
-    print(f"End    MAE (s): {mae_end:.2f}")
-    print(f"Phase Acc (%): {acc * 100:.2f}")
+    # ---------------- Model ----------------
 
-    print("\nLaTeX row:")
-    print(
-        f"{mae_remain:.2f} & "
-        f"{mae_start:.2f} & "
-        f"{mae_end:.2f} & "
-        f"{acc * 100:.2f}"
+    model = FutureTimelineModel().to(device)
+
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=args.lr
     )
+
+    criterion = nn.SmoothL1Loss()
+
+    best_val = float("inf")
+
+    train_curve = []
+    val_curve = []
+
+    # ==========================================================
+    # Training Loop
+    # ==========================================================
+
+    for epoch in range(args.epochs):
+
+        model.train()
+
+        running_loss = 0.0
+
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}")
+
+        for batch in pbar:
+
+            frames, stage_order, ratio_list, all_time = batch
+
+            stage_order = stage_order.to(device)
+            ratio_list = ratio_list.to(device)
+            all_time = all_time.to(device)
+
+            # ---------------- current stage ----------------
+
+            mask = (ratio_list > 0)
+            cur_stage_idx = mask.float().argmax(dim=1) + 1   # [B]
+
+            ratio_input = ratio_list.gather(
+                1, (cur_stage_idx - 1).unsqueeze(1)
+            )
+
+            # ---------------- forward ----------------
+
+            raw_future = model(
+                cur_stage_idx,
+                ratio_input,
+                stage_order,
+                all_time
+            )
+
+            # ---------------- GT ----------------
+
+            gt_future = build_gt_future(
+                cur_stage_idx,
+                ratio_list,
+                stage_order,
+                all_time
+            )
+
+            # ---------------- loss ----------------
+
+            loss = criterion(raw_future, gt_future)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+
+            pbar.set_postfix(loss=f"{loss.item():.3f}")
+
+        avg_train = running_loss / len(train_loader)
+        train_curve.append(avg_train)
+
+        logger.info(
+            f"Epoch {epoch+1} Train Loss: {avg_train:.4f}"
+        )
+
+        # ---------------- Validation ----------------
+
+        model.eval()
+        val_running = 0.0
+
+        with torch.no_grad():
+
+            for batch in val_loader:
+
+                frames, stage_order, ratio_list, all_time = batch
+
+                stage_order = stage_order.to(device)
+                ratio_list = ratio_list.to(device)
+                all_time = all_time.to(device)
+
+                mask = (ratio_list > 0)
+                cur_stage_idx = mask.float().argmax(dim=1) + 1
+
+                ratio_input = ratio_list.gather(
+                    1, (cur_stage_idx - 1).unsqueeze(1)
+                )
+
+                raw_future = model(
+                    cur_stage_idx,
+                    ratio_input,
+                    stage_order,
+                    all_time
+                )
+
+                gt_future = build_gt_future(
+                    cur_stage_idx,
+                    ratio_list,
+                    stage_order,
+                    all_time
+                )
+
+                val_running += criterion(raw_future, gt_future).item()
+
+        val_loss = val_running / len(val_loader)
+        val_curve.append(val_loss)
+
+        logger.info(
+            f"Epoch {epoch+1} Val Loss: {val_loss:.4f}"
+        )
+
+        # ---------------- Save best ----------------
+
+        if val_loss < best_val:
+
+            best_val = val_loss
+
+            torch.save(
+                {
+                    "epoch": epoch + 1,
+                    "state_dict": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "best_loss": best_val,
+                    "args": vars(args)
+                },
+                best_ckpt_path
+            )
+
+            logger.info("Saved new best checkpoint")
+
+    # ==========================================================
+    # Finished
+    # ==========================================================
+
+    logger.info(f"Training finished. Best Val Loss: {best_val:.4f}")
+
+    plt.figure(figsize=(7, 4))
+    plt.plot(train_curve, label="Train")
+    plt.plot(val_curve, label="Val")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.grid(True)
+
+    curve_path = os.path.join(exp_dir, "loss_curve.png")
+    plt.savefig(curve_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+    logger.info(f"Curve saved: {curve_path}")
 
 
 if __name__ == "__main__":
