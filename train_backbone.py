@@ -8,8 +8,8 @@ from tqdm import tqdm
 import random
 import logging
 
-from task1_data import Cholec80DatasetTaskA
-from task1_model import TaskA_CNN, TaskA_CNN_LSTM
+from task1_data_loader import Cholec80DatasetTaskA
+from model_backbone import TaskA_CNN, TaskA_CNN_LSTM
 
 import numpy as np
 from sklearn.metrics import r2_score

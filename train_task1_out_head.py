@@ -11,8 +11,8 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-from task1_data import Cholec80DatasetTaskA
-from output_head import FutureTimelineModel
+from task1_data_loader import Cholec80DatasetTaskA
+from model_out_head import FutureTimelineModel
 
 
 NUM_PHASES = 7
