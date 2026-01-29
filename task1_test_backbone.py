@@ -112,27 +112,40 @@ def validate_phase_and_remain(model, loader, device):
     total_correct = 0
     total_num = 0
 
-    preds_ratio = []
-    gts_ratio = []
+    preds_time = []
+    gts_time = []
 
     for frames, stage_order, ratio_list, all_time in tqdm(loader):
 
         frames = frames.to(device)
         stage_order = stage_order.to(device)
         ratio_list = ratio_list.to(device)
+        all_time = all_time.to(device)
 
-        # current stage index
+        # ----------------------------
+        # locate current phase index
+        # ----------------------------
         mask = (ratio_list > 0)
         cur_stage_idx = mask.float().argmax(dim=1)
 
+        # phase gt
         phase_gt = stage_order.gather(
             1, cur_stage_idx.unsqueeze(1)
         ).squeeze(1)
 
+        # ratio gt
         phase_remain_gt = ratio_list.gather(
             1, cur_stage_idx.unsqueeze(1)
         ).squeeze(1)
 
+        # total time of current phase
+        phase_total_time = all_time.gather(
+            1, cur_stage_idx.unsqueeze(1)
+        ).squeeze(1)
+
+        # ----------------------------
+        # model prediction
+        # ----------------------------
         pred_phase_logits, pred_phase_remain = model(frames)
 
         pred_phase_remain = torch.clamp(pred_phase_remain, 0.0, 1.0)
@@ -144,18 +157,24 @@ def validate_phase_and_remain(model, loader, device):
         total_correct += ((pred_phase == phase_gt) & valid).sum().item()
         total_num += valid.sum().item()
 
-        preds_ratio.append(pred_phase_remain.cpu().numpy())
-        gts_ratio.append(phase_remain_gt.cpu().numpy())
+        # ----------------------------
+        # ratio -> time (seconds)
+        # ----------------------------
+        gt_time = phase_remain_gt * phase_total_time
+        pred_time = pred_phase_remain * phase_total_time
+
+        preds_time.append(pred_time[valid].cpu().numpy())
+        gts_time.append(gt_time[valid].cpu().numpy())
 
     acc = total_correct / max(total_num, 1)
 
-    preds_ratio = np.concatenate(preds_ratio)
-    gts_ratio = np.concatenate(gts_ratio)
+    preds_time = np.concatenate(preds_time)
+    gts_time = np.concatenate(gts_time)
 
-    mae_ratio = np.mean(np.abs(preds_ratio - gts_ratio))
-    r2_ratio = r2_score(gts_ratio, preds_ratio)
+    mae_time = np.mean(np.abs(preds_time - gts_time))
+    r2_time = r2_score(gts_time, preds_time)
 
-    return acc, mae_ratio, r2_ratio
+    return acc, mae_time, r2_time
 
 
 # -------------------------------------------------
