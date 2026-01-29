@@ -12,10 +12,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from task1_data_loader import Cholec80DatasetTaskA
-from taskA_model import TaskA_CNN, TaskA_CNN_LSTM
-from model_out_head_task2 import ToolPredictionModel
+from model_out_head import ToolPredictionModel
 
 
+NUM_PHASES = 7
 NUM_TOOLS = 7
 
 
@@ -42,10 +42,6 @@ def parse_args():
 
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--seed", type=int, default=42)
-
-    parser.add_argument("--taskA_ckpt", type=str, required=True)
-    parser.add_argument("--taskA_model", type=str, default="cnn",
-                        choices=["cnn", "cnn_lstm"])
 
     return parser.parse_args()
 
@@ -138,7 +134,7 @@ def main():
         mode="train",
         seq_len=args.seq_len,
         stride=args.stride,
-        transform=transform,
+        transform=transform
     )
 
     val_dataset = Cholec80DatasetTaskA(
@@ -146,7 +142,7 @@ def main():
         mode="val",
         seq_len=args.seq_len,
         stride=args.stride,
-        transform=transform,
+        transform=transform
     )
 
     train_loader = DataLoader(
@@ -167,33 +163,18 @@ def main():
     logger.info(f"Train samples: {len(train_dataset)}")
     logger.info(f"Val samples: {len(val_dataset)}")
 
-    # ---------------- Load TaskA ----------------
-
-    if args.taskA_model == "cnn":
-        taskA = TaskA_CNN()
-    else:
-        taskA = TaskA_CNN_LSTM()
-
-    ckpt = torch.load(args.taskA_ckpt, map_location=device)
-    taskA.load_state_dict(ckpt["state_dict"])
-
-    taskA.to(device)
-    taskA.eval()
-
-    for p in taskA.parameters():
-        p.requires_grad = False
-
-    logger.info("Loaded TaskA checkpoint and frozen weights")
-
-    # ---------------- TaskB Out Head ----------------
+    # ---------------- Task2 Out Head ----------------
 
     model = ToolPredictionModel(
         hidden_dim=128,
-        num_phases=7,
+        num_phases=NUM_PHASES,
         num_tools=NUM_TOOLS
     ).to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=args.lr
+    )
 
     criterion = nn.BCEWithLogitsLoss()
 
@@ -208,6 +189,8 @@ def main():
 
     for epoch in range(args.epochs):
 
+        # ---------------- Train ----------------
+
         model.train()
         running_loss = 0.0
 
@@ -215,20 +198,29 @@ def main():
 
         for batch in pbar:
 
-            frames, _, _, _, tool_gt = batch
+            frames, stage_order, ratio_list, all_time, tool_gt = batch
 
-            frames = frames.to(device)
+            stage_order = stage_order.to(device)
+            ratio_list = ratio_list.to(device)
+            all_time = all_time.to(device)
             tool_gt = tool_gt.to(device)
 
-            # ---------- TaskA forward ----------
+            # ---------- compute current stage ----------
 
-            with torch.no_grad():
-                phase_logits, phase_remain = taskA(frames)
+            mask = (ratio_list > 0)
+            cur_stage_idx = mask.float().argmax(dim=1) + 1   # [B]
 
-                # current stage index (1~7)
-                cur_stage_idx = torch.argmax(phase_logits, dim=1) + 1
+            # ---------- compute remaining time ----------
 
-            # ---------- TaskB forward ----------
+            phase_remain = ratio_list.gather(
+                1, (cur_stage_idx - 1).unsqueeze(1)
+            ) * all_time.gather(
+                1, (cur_stage_idx - 1).unsqueeze(1)
+            )
+
+            phase_remain = phase_remain.squeeze(1)   # [B]
+
+            # ---------- forward ----------
 
             pred_tool = model(
                 cur_stage_idx,
@@ -261,13 +253,23 @@ def main():
 
             for batch in val_loader:
 
-                frames, _, _, _, tool_gt = batch
+                frames, stage_order, ratio_list, all_time, tool_gt = batch
 
-                frames = frames.to(device)
+                stage_order = stage_order.to(device)
+                ratio_list = ratio_list.to(device)
+                all_time = all_time.to(device)
                 tool_gt = tool_gt.to(device)
 
-                phase_logits, phase_remain = taskA(frames)
-                cur_stage_idx = torch.argmax(phase_logits, dim=1) + 1
+                mask = (ratio_list > 0)
+                cur_stage_idx = mask.float().argmax(dim=1) + 1
+
+                phase_remain = ratio_list.gather(
+                    1, (cur_stage_idx - 1).unsqueeze(1)
+                ) * all_time.gather(
+                    1, (cur_stage_idx - 1).unsqueeze(1)
+                )
+
+                phase_remain = phase_remain.squeeze(1)
 
                 pred_tool = model(
                     cur_stage_idx,
