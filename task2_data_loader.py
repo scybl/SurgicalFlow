@@ -4,79 +4,22 @@ from torch.utils.data import Dataset
 import numpy as np
 from PIL import Image
 
-from torchvision import transforms
-
-# -----------------------------
-# Constants
-# -----------------------------
-
 FPS_ORI = 25
-JUMP_FPS = 1
 
 PHASE2ID = {
-    "Preparation": 0,
-    "CalotTriangleDissection": 1,
-    "ClippingCutting": 2,
-    "GallbladderDissection": 3,
-    "GallbladderPackaging": 4,
-    "CleaningCoagulation": 5,
-    "GallbladderRetraction": 6
+    "Preparation": 1,
+    "CalotTriangleDissection": 2,
+    "ClippingCutting": 3,
+    "GallbladderDissection": 4,
+    "GallbladderPackaging": 5,
+    "CleaningCoagulation": 6,
+    "GallbladderRetraction": 7
 }
 
-NUM_PHASES = len(PHASE2ID)
 NUM_TOOLS = 7
 
 
-
-def extract_frame_idx(name):
-    """
-    frame_000025.jpg -> 25
-    """
-    base = os.path.splitext(name)[0]
-    return int(base.split("_")[-1])
-
-
-def load_tool_annotation(txt_path):
-    """
-    Tool annotation format:
-    Frame Grasper Bipolar Hook Scissors Clipper Irrigator SpecimenBag
-    0     1       0       0    0        0       0         0
-    ...
-
-    Returns:
-        dict {frame_idx: [7-dim tool vector]}
-    """
-    tool_map = {}
-
-    with open(txt_path, "r") as f:
-        header = f.readline()  # skip header
-
-        for line in f:
-            parts = line.strip().split()
-
-            frame_idx = int(parts[0])
-            tools = list(map(int, parts[1:]))
-
-            tool_map[frame_idx] = tools
-
-    return tool_map
-
-
-class Cholec80TaskBDataset(Dataset):
-    """
-    Task B Dataset (Joint supervision):
-
-    Input:
-        image (1 FPS, every 25 frames)
-
-    Target:
-        joint_label [14] = [ tool(7) , phase_onehot(7) ]
-
-    Output:
-        img: Tensor [3,H,W]
-        joint_label: Tensor [14]
-    """
-
+class Cholec80DatasetTaskA(Dataset):
     def __init__(
         self,
         root_dir,
@@ -89,198 +32,242 @@ class Cholec80TaskBDataset(Dataset):
         tool_dirname="tool_annotations"
     ):
 
-        assert mode in ["train", "val", "test"]
-
         self.root_dir = root_dir
-        self.mode = mode
+        self.frames_root = os.path.join(root_dir, frames_dirname)
+        self.phase_dir = os.path.join(root_dir, phase_dirname)
+        self.tool_dir = os.path.join(root_dir, tool_dirname)
+
         self.seq_len = seq_len
         self.stride = stride
         self.transform = transform
-
-        if transform is None:
-            self.transform = transforms.Compose([
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225]
-                )
-            ])
-        else:
-            self.transform = transform
-
-
-        self.frames_root = os.path.join(root_dir, frames_dirname)
-        self.phase_root = os.path.join(root_dir, phase_dirname)
-        self.tool_root = os.path.join(root_dir, tool_dirname)
-
         self.samples = []
 
+        self.mode = mode
         self._build_index()
+
+    # -------------------------------------------------
 
     def _build_index(self):
 
-        assert os.path.isdir(self.frames_root), f"frames_root not found: {self.frames_root}"
-        assert os.path.isdir(self.phase_root),  f"phase_root not found: {self.phase_root}"
-        assert os.path.isdir(self.tool_root),   f"tool_root not found: {self.tool_root}"
+        all_videos = sorted(os.listdir(self.frames_root))
 
-        video_list = sorted(os.listdir(self.frames_root))
         if self.mode == "train":
-            video_list = video_list[:40]
-        if self.mode == "val":
-            video_list = video_list[40:50]
-        if self.mode == "test":
-            video_list = video_list[50:]
+            used_videos = all_videos[:40]
+        elif self.mode == "val":
+            used_videos = all_videos[40:50]
+        elif self.mode == "test":
+            used_videos = all_videos[50:80]
+        else:
+            raise ValueError(self.mode)
 
-        print("[DBG] videos under frames_root:", len(video_list))
+        print(f"[{self.mode}] videos:", len(used_videos))
 
-        for vid in video_list:
-            print(f"[DBG] video: {vid}")
+        for video_name in used_videos:
 
-            frame_dir = os.path.join(self.frames_root, vid)
+            # ---------------- load phase ----------------
 
-            # 允许 phase/tool 文件名可能是 "video01.txt" 或 "01.txt" 或 "video01_phase.txt" 这种
-            phase_file = os.path.join(self.phase_root, f"{vid}-phase.txt")
-            tool_file  = os.path.join(self.tool_root,  f"{vid}-tool.txt")
+            phase_path = os.path.join(self.phase_dir, f"{video_name}-phase.txt")
 
-            frame_names = sorted([f for f in os.listdir(frame_dir) if f.lower().endswith((".png"))])[::JUMP_FPS]
-
-
-            with open(phase_file, "r") as f:
-                phase_lines = f.readlines()[1::FPS_ORI * JUMP_FPS]  # 去表头 + 抽样
+            with open(phase_path, "r") as f:
+                phase_lines = f.readlines()[1::FPS_ORI]
 
             phase_ids = []
+            stage_order = []
+            stage_durations = []
+
+            prev = None
+            cur_len = 0
 
             for line in phase_lines:
-                _, phase_name = line.strip().split("\t")
-                phase_id = PHASE2ID[phase_name]
-                phase_ids.append(phase_id)
 
-            # ---------- 循环结束后再转 tensor ----------
+                pname = line.split("\t")[1].strip()
 
-            phase_ids = torch.tensor(phase_ids, dtype=torch.long)   # [N]
+                if pname not in PHASE2ID:
+                    raise ValueError(f"Unknown phase: {pname}")
 
-            num_classes = len(PHASE2ID)
-            phase_onehot = torch.nn.functional.one_hot(
-                phase_ids,
-                num_classes=num_classes
-            ).float()   # [N, 7]
+                pid = PHASE2ID[pname]
+                phase_ids.append(pid)
 
-            with open(tool_file, "r") as f:
-                tool_lines = f.readlines()[1::JUMP_FPS]  # 去表头 + 抽样
+                if pid != prev:
+                    if prev is not None:
+                        stage_durations.append(cur_len)
+                    stage_order.append(pid)
+                    cur_len = 1
+                    prev = pid
+                else:
+                    cur_len += 1
+
+            stage_durations.append(cur_len)
+
+            while len(stage_order) < 7:
+                stage_order.append(0)
+
+            # ---------------- load frames ----------------
+
+            video_folder = os.path.join(self.frames_root, video_name)
+
+            frame_names = sorted(os.listdir(video_folder))
+            frame_names = [f for f in frame_names if f.lower().endswith(".png")]
+
+            frame_names.sort(
+                key=lambda x: int(x.split("_")[-1].split(".")[0])
+            )
+
+            frame_paths = [os.path.join(video_folder, f) for f in frame_names]
+
+            # ---------------- load tools ----------------
+
+            tool_path = os.path.join(self.tool_dir, f"{video_name}-tool.txt")
+
+            with open(tool_path, "r") as f:
+                tool_lines = f.readlines()[1::FPS_ORI]
 
             tool_labels = []
 
             for line in tool_lines:
                 parts = line.strip().split()
+                tools = list(map(int, parts[1:]))
+                tool_labels.append(tools)
 
-                # 去掉第一列 frame_id
-                tool_vals = parts[1:]   # 长度应为 7
+            tool_labels = torch.tensor(tool_labels, dtype=torch.float32)  # [N,7]
 
-                # 转 int
-                tool_vals = [int(x) for x in tool_vals]
+            # ---------------- align length ----------------
 
-                tool_labels.append(tool_vals)
+            usable_len = min(
+                len(frame_paths),
+                len(phase_ids),
+                len(tool_labels)
+            )
 
-            # 一次性转 tensor
-            tool_labels = torch.tensor(tool_labels, dtype=torch.float32)   # [N, 7]
+            frame_paths = frame_paths[:usable_len]
+            phase_ids = phase_ids[:usable_len]
+            tool_labels = tool_labels[:usable_len]
 
-            print("[DBG] tool tensor shape:", tool_labels.shape)
+            N = usable_len
 
-            if len(frame_names) != len(phase_onehot) or len(frame_names) != len(tool_labels):
-                min_len = min(len(frame_names), len(phase_onehot), len(tool_labels))
-                frame_names = frame_names[:min_len]
-                phase_onehot = phase_onehot[:min_len]
-                tool_labels = tool_labels[:min_len]
-                            
-            seq_len = self.seq_len # 一个 sample 的长度 
-            stride = self.stride # 采样步长
+            # ---------------- sliding window ----------------
 
-            N = min_len
+            for start in range(0, N - self.seq_len + 1, self.stride):
 
-            for start in range(0, N - seq_len + 1, stride):
+                end_idx = start + self.seq_len - 1
 
-                end = start + seq_len
-                anchor = end - 1   # 当前时刻 t
+                clip_frame_paths = frame_paths[start:end_idx + 1]
 
-                # -------- frames --------
-                frame_seq = [
-                    os.path.join(frame_dir, frame_names[i])
-                    for i in range(start, end)
-                ]   # length = 8
+                # ---------- TaskA timing target ----------
 
-                # -------- tool labels --------
-                tool_window = tool_labels[start:end]   # [8,7]
+                cur_phase = phase_ids[end_idx]
 
-                tool_past = (tool_window[:4].sum(dim=0) > 0).float()
-                tool_curr = tool_window[anchor - start]
-                tool_fut  = (tool_window[4:].sum(dim=0) > 0).float()
+                if cur_phase not in stage_order:
+                    continue
 
-                tool_3c = torch.stack([tool_past, tool_curr, tool_fut], dim=1)  # [7,3]
+                stage_pos = stage_order.index(cur_phase)
 
-                # -------- phase labels --------
-                phase_window = phase_onehot[start:end]  # [8,7]
+                phase_start_idx = end_idx
+                while phase_start_idx > 0 and phase_ids[phase_start_idx - 1] == cur_phase:
+                    phase_start_idx -= 1
 
-                phase_curr_id = phase_window[anchor - start].argmax()
+                offset_in_phase = end_idx - phase_start_idx
 
-                phase_3c = torch.zeros(NUM_PHASES, 3)
+                current_time = sum(stage_durations[:stage_pos]) + offset_in_phase
 
-                # past
-                phase_3c[: ,0] = (phase_window[:4].sum(dim=0) > 0).float()
+                remain = current_time
+                time_list = []
 
-                # current (one-hot)
-                phase_3c[phase_curr_id, 1] = 1.0
+                for dur in stage_durations:
+                    if remain >= dur:
+                        time_list.append(0)
+                        remain -= dur
+                    else:
+                        time_list.append(dur - remain)
+                        remain = 0
 
-                # future
-                phase_3c[:,2] = (phase_window[4:].sum(dim=0) > 0).float()
+                # ---------- TaskB tool label (anchor frame) ----------
 
-                # -------- append sample --------
+                cur_tool = tool_labels[end_idx]   # [7]
+
+                # ---------- save sample ----------
+
                 self.samples.append({
-                    "frames": frame_seq,    # list of 8 paths
-                    "tool": tool_3c,        # [7,3]
-                    "phase": phase_3c       # [7,3]
+                    "frames": clip_frame_paths,
+                    "stage_order": stage_order,
+                    "time": time_list,
+                    "all_time": stage_durations,
+                    "tool": cur_tool
                 })
 
-        print(f"[TaskB] {self.mode} loaded {len(self.samples)} samples")
+        print(f"[{self.mode}] samples:", len(self.samples))
+
+    # -------------------------------------------------
 
     def __len__(self):
         return len(self.samples)
+
+    # -------------------------------------------------
 
     def __getitem__(self, idx):
 
         sample = self.samples[idx]
 
-        img_path = sample["frames"]
-        tool = sample["tool"]
-        phase = sample["phase"]
+        frame_paths = sample["frames"]
+        stage_order = sample["stage_order"]
+        time_list = sample["time"]
+        all_time = sample["all_time"]
+        tool_label = sample["tool"]
 
         frames = []
 
-        for p in img_path:
+        for p in frame_paths:
+
             img = Image.open(p).convert("RGB")
 
             if self.transform:
                 img = self.transform(img)
             else:
-                img = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+                img = torch.from_numpy(
+                    np.array(img, dtype=np.float32)
+                ).permute(2, 0, 1) / 255.0
 
             frames.append(img)
 
-        frames = torch.stack(frames, dim=0)  # [8,3,H,W]
+        frames = torch.stack(frames, dim=0)
 
-        return frames, tool, phase
+        ratio_list = []
+
+        for r, t in zip(time_list, all_time):
+            ratio = r / t
+            ratio = min(max(ratio, 0.0), 1.0)
+            ratio_list.append(ratio)
+
+        if len(stage_order) == 6:
+            stage_order.append(0)
+
+        if len(ratio_list) == 6:
+            ratio_list.append(0.0)
+
+        if len(all_time) == 6:
+            all_time.append(0.0)
+
+        return (
+            frames,
+            torch.tensor(stage_order, dtype=torch.long),
+            torch.tensor(ratio_list, dtype=torch.float32),
+            torch.tensor(all_time, dtype=torch.float32),
+            tool_label
+        )
 
 
 
 if __name__ == "__main__":
 
-    dataset = Cholec80TaskBDataset(
+    dataset = Cholec80DatasetTaskA(
         root_dir="data/cholec80",
         mode="train"
     )
 
-    img, tool, phase = dataset[50]
+    frames, stage_order, ratio_list, all_time, tool = dataset[3]
 
-    print("Image shape:", img.shape)
-    print("Label shape:", phase.shape)
-    print("Tool part:", tool.shape)
+    print("Frames:", frames.shape)
+    print("Stage order:", stage_order)
+    print("Ratio list:", ratio_list)
+    print("All time:", all_time)
+    print("Tool:", tool.shape)
