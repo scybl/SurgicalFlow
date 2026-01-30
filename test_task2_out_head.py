@@ -28,7 +28,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--backbone_name", type=str, required=True)
-
+    parser.add_argument("--head_name", type=str, required=True)
     parser.add_argument("--backbone_model", type=str, required=True,
                         choices=["cnn", "cnn_lstm"])
 
