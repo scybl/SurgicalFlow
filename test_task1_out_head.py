@@ -13,6 +13,7 @@ from tqdm import tqdm
 from task1_data_loader import Cholec80DatasetTaskA
 from model_backbone import TaskA_CNN, TaskA_CNN_LSTM
 from model_out_head import FutureTimelineModel
+import matplotlib.pyplot as plt
 
 # -------------------------------------------------
 # Argument Parser (IDENTICAL to train)
@@ -111,6 +112,48 @@ def build_model(model_name):
 # -------------------------------------------------
 # Validation (IDENTICAL TO TRAIN)
 # -------------------------------------------------
+def plot_future_timeline(preds_future, gts_future, save_path):
+    """
+    Plot average future timeline prediction vs GT
+
+    preds_future: [N,7]
+    gts_future:   [N,7]
+    """
+
+    # 只统计有效阶段
+    mask = gts_future > 0
+
+    pred_mean = []
+    gt_mean = []
+
+    for i in range(gts_future.shape[1]):
+
+        valid_idx = mask[:, i]
+
+        if valid_idx.sum() == 0:
+            pred_mean.append(0)
+            gt_mean.append(0)
+        else:
+            pred_mean.append(preds_future[valid_idx, i].mean())
+            gt_mean.append(gts_future[valid_idx, i].mean())
+
+    x = np.arange(1, 8)
+
+    plt.figure(figsize=(7, 4))
+
+    plt.plot(x, gt_mean, marker='o', label="GT")
+    plt.plot(x, pred_mean, marker='o', label="Prediction")
+
+    plt.xlabel("Phase Index")
+    plt.ylabel("Time (seconds)")
+    plt.title("Average Future Timeline Prediction")
+
+    plt.legend()
+    plt.grid(True)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=200)
+    plt.close()
 
 def build_gt_future(cur_stage_idx, ratio_list, stage_order, all_time):
 
@@ -263,7 +306,7 @@ def validate_pipeline(backbone, head, loader, device):
         preds_future[end_mask]
     )
 
-    return acc, start_mae, end_mae, r2_time
+    return acc, start_mae, end_mae, r2_time, preds_future, gts_future
 # -------------------------------------------------
 # Main
 # -------------------------------------------------
@@ -362,7 +405,7 @@ def main():
 
     # ---------------- Test ----------------
 
-    test_acc, test_start_mae, test_end_mae, r2_score = validate_pipeline(
+    test_acc, test_start_mae, test_end_mae, r2_score, preds_future, gts_future = validate_pipeline(
         backbone,
         out_head,
         test_loader,
@@ -389,6 +432,15 @@ def main():
         json.dump(result_dict, f, indent=4)
 
     logger.info(f"Test results saved to: {result_path}")
+    plot_path = os.path.join(exp_dir, "future_timeline_curve.png")
+
+    plot_future_timeline(
+        preds_future,
+        gts_future,
+        plot_path
+    )
+
+    logger.info(f"Timeline curve saved to: {plot_path}")
 
 
 if __name__ == "__main__":
