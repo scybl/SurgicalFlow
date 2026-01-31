@@ -1,5 +1,6 @@
 import os
 from collections import defaultdict
+import matplotlib.pyplot as plt
 
 PHASE2ID = {
     "Preparation": 0,
@@ -90,3 +91,46 @@ if __name__ == "__main__":
     for p, vids in pattern2videos.items():
         print(p, ":", len(vids), "videos")
         print("   ", vids)
+        
+    patterns = []
+    counts = []
+
+    for p, vids in pattern2videos.items():
+        patterns.append(str(p))
+        counts.append(len(vids))
+
+    # 按数量排序（从大到小）
+    pairs = sorted(zip(patterns, counts), key=lambda x: x[1], reverse=True)
+    patterns, counts = zip(*pairs)
+
+    # ---------------- plot ----------------
+
+    plt.figure(figsize=(10, 5))   # 6 类用这个比例最合适
+
+    bars = plt.bar(range(len(counts)), counts)
+
+    plt.xticks(
+        ticks=range(len(patterns)),
+        labels=patterns,
+        rotation=30,
+        fontsize=10
+    )
+
+    plt.xlabel("Phase Pattern")
+    plt.ylabel("Number of Videos")
+    plt.title("Distribution of Phase Transition Patterns (Cholec80)")
+
+    # 数值标注
+    for bar in bars:
+        h = bar.get_height()
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            h,
+            f"{int(h)}",
+            ha="center",
+            va="bottom",
+            fontsize=10
+        )
+
+    plt.tight_layout()
+    plt.show()
