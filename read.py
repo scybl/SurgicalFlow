@@ -1,335 +1,286 @@
 import os
+import argparse
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
-import random
 import numpy as np
-from tqdm import tqdm
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 from task1_data_loader import Cholec80DatasetTaskA
 from model_backbone import TaskA_CNN, TaskA_CNN_LSTM
-from model_out_head import FutureTimelineModel
-
-from types import SimpleNamespace
 
 
-# =========================================================
-# ===== 手动定义三组实验参数（命名保持原 args 风格）=====
-# =========================================================
+# ============================================================
+# ================ MODEL CONFIG AREA (EDIT HERE) ============
+# ============================================================
 
-ARGS_LIST = [
+MODELS = [
 
-    SimpleNamespace(
-        backbone_name="TaskA_CNN_LSTM_8",
-        head_name="TimelineHead_8",
+    {
+        "name": "CNN Baseline",
+        "exp": "cnn_version4",      # checkpoints/cnn_baseline/best.pth
+        "model": "cnn",
+        "seq_len": 16,
+        "stride": 8,
+    },
 
-        backbone_model="cnn_lstm",
-        data_root="data/cholec80",
+    {
+        "name": "CNN-LSTM (N=32)",
+        "exp": "cnn_LSTM_version4_32",           # checkpoints/lstm_16/best.pth
+        "model": "cnn_lstm",
+        "seq_len": 32,
+        "stride": 16,
+    },
 
-        seq_len=8,
-        stride=4,
-
-        batch_size=16,
-        lr=1e-4,
-        epochs=20,
-
-        num_workers=8,
-        device="cuda",
-        seed=42
-    ),
-
-    SimpleNamespace(
-        backbone_name="TaskA_CNN_LSTM_16",
-        head_name="TimelineHead_16",
-
-        backbone_model="cnn_lstm",
-        data_root="data/cholec80",
-
-        seq_len=16,
-        stride=8,
-
-        batch_size=16,
-        lr=1e-4,
-        epochs=20,
-
-        num_workers=8,
-        device="cuda",
-        seed=42
-    ),
-
-    SimpleNamespace(
-        backbone_name="TaskA_CNN_LSTM_32",
-        head_name="TimelineHead_32",
-
-        backbone_model="cnn_lstm",
-        data_root="data/cholec80",
-
-        seq_len=32,
-        stride=16,
-
-        batch_size=8,
-        lr=1e-4,
-        epochs=20,
-
-        num_workers=8,
-        device="cuda",
-        seed=42
-    )
+    {
+        "name": "CNN-LSTM (N=16)",
+        "exp": "cnn_LSTM_version4",           # checkpoints/lstm_32/best.pth
+        "model": "cnn_lstm",
+        "seq_len": 16,
+        "stride": 8,
+    },
 
 ]
 
-SAVE_DIR = "checkpoints/temporal_window_curve"
+# ============================================================
+# ================= VISUAL WINDOW CONFIG ====================
+# ============================================================
+
+START_OFFSET = 300     # 跳过前面不稳定段（关键）
+VIS_WINDOW = 720      # 可视化长度
 
 
-# =========================================================
-# Utils
-# =========================================================
+# ============================================================
+# ====================== ARG PARSER =========================
+# ============================================================
 
-def set_seed(seed):
+def parse_args():
 
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    parser = argparse.ArgumentParser()
 
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+    parser.add_argument("--data_root", type=str, default="data/cholec80")
+    parser.add_argument("--save_dir", type=str, default="checkpoints")
+
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--num_workers", type=int, default=8)
+
+    parser.add_argument("--device", type=str, default="cuda")
+
+    return parser.parse_args()
 
 
-# =========================================================
-# Build backbone
-# =========================================================
+# ============================================================
+# ======================= BUILD MODEL =======================
+# ============================================================
 
-def build_backbone(name):
+def build_model(name):
 
     if name == "cnn":
         return TaskA_CNN()
-    else:
+
+    elif name == "cnn_lstm":
         return TaskA_CNN_LSTM()
 
-
-# =========================================================
-# GT future builder
-# =========================================================
-
-def build_gt_future(cur_stage_idx, ratio_list, stage_order, all_time):
-
-    B = cur_stage_idx.shape[0]
-    gt_future = torch.zeros((B, 7), device=cur_stage_idx.device)
-
-    for b in range(B):
-
-        cur = int(cur_stage_idx[b])
-
-        if cur == 0:
-            continue
-
-        idx = cur - 1
-
-        remain = ratio_list[b, idx] * all_time[b, idx]
-
-        acc = remain
-        gt_future[b, idx] = acc
-
-        for j in range(idx + 1, 7):
-
-            if stage_order[b, j] == 0:
-                continue
-
-            acc += all_time[b, j]
-            gt_future[b, j] = acc
-
-    return gt_future
+    else:
+        raise ValueError(name)
 
 
-# =========================================================
-# Validation
-# =========================================================
+# ============================================================
+# ====================== LOAD MODEL =========================
+# ============================================================
+
+def load_model(cfg, save_dir, device):
+
+    model = build_model(cfg["model"]).to(device)
+
+    ckpt_path = os.path.join(save_dir, cfg["exp"], "best.pth")
+
+    if not os.path.exists(ckpt_path):
+        raise FileNotFoundError(ckpt_path)
+
+    ckpt = torch.load(ckpt_path, map_location=device,weights_only=False)
+
+    model.load_state_dict(ckpt["state_dict"])
+    model.eval()
+
+    print(f"Loaded: {cfg['name']}")
+
+    return model
+
+
+# ============================================================
+# ============================ MAIN =========================
+# ============================================================
 
 @torch.no_grad()
-def validate_pipeline(backbone, head, loader, device):
-
-    backbone.eval()
-    head.eval()
-
-    preds_all = []
-    gts_all = []
-
-    for frames, stage_order, ratio_list, all_time in tqdm(loader):
-
-        frames = frames.to(device)
-        stage_order = stage_order.to(device)
-        ratio_list = ratio_list.to(device)
-        all_time = all_time.to(device)
-
-        mask = (ratio_list > 0)
-        cur_stage_idx = mask.float().argmax(dim=1)
-
-        pred_phase_logits, pred_ratio = backbone(frames)
-
-        pred_phase = torch.argmax(pred_phase_logits, dim=1)
-        pred_ratio = torch.clamp(pred_ratio, 0, 1)
-
-        ratio_input = pred_ratio.unsqueeze(1)
-
-        pred_future = head(
-            pred_phase,
-            ratio_input,
-            stage_order,
-            all_time
-        )
-
-        gt_future = build_gt_future(
-            cur_stage_idx,
-            ratio_list,
-            stage_order,
-            all_time
-        )
-
-        valid = (gt_future > 0)
-
-        preds_all.append(pred_future[valid].cpu().numpy())
-        gts_all.append(gt_future[valid].cpu().numpy())
-
-    preds_all = np.concatenate(preds_all)
-    gts_all = np.concatenate(gts_all)
-
-    mae = np.mean(np.abs(preds_all - gts_all))
-
-    return mae
-
-
-# =========================================================
-# Main
-# =========================================================
-
 def main():
 
-    os.makedirs(SAVE_DIR, exist_ok=True)
+    args = parse_args()
 
-    print("========== Temporal Window Ablation ==========")
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-    # -------------------------------------------------
-    # Transform
-    # -------------------------------------------------
+    print("Device:", device)
+
+    # ---------------- Transform ----------------
 
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(
             mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225]
+            std=[0.229, 0.224, 0.225],
         ),
     ])
 
-    window_list = []
-    mae_list = []
+    # ---------------- Dataset ----------------
 
-    # -------------------------------------------------
-    # Loop experiments
-    # -------------------------------------------------
+    max_seq_len = max([m["seq_len"] for m in MODELS])
+    max_stride = max([m["stride"] for m in MODELS])
 
-    for args in ARGS_LIST:
+    print("Max seq_len:", max_seq_len)
+    print("Max stride:", max_stride)
 
-        print("\n--------------------------------------")
-        print("Running:", args.backbone_name)
-        print("--------------------------------------")
+    test_dataset = Cholec80DatasetTaskA(
+        root_dir=args.data_root,
+        mode="test",
+        seq_len=max_seq_len,
+        stride=max_stride,
+        transform=transform,
+    )
 
-        set_seed(args.seed)
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=(device.type == "cuda")
+    )
 
-        device = torch.device(
-            args.device if torch.cuda.is_available() else "cpu"
+    print("Total test samples:", len(test_dataset))
+
+    # ---------------- Load Models ----------------
+
+    models = []
+
+    for cfg in MODELS:
+        model = load_model(cfg, args.save_dir, device)
+        models.append(model)
+
+    # ---------------- Buffers ----------------
+
+    gt_buffer = []
+    pred_buffers = [[] for _ in MODELS]
+
+    # ---------------- Forward full test set ----------------
+
+    for frames, stage_order, ratio_list, all_time in tqdm(test_loader):
+
+        frames = frames.to(device)
+        ratio_list = ratio_list.to(device)
+        all_time = all_time.to(device)
+
+        # locate current phase
+        mask = (ratio_list > 0)
+        cur_stage_idx = mask.float().argmax(dim=1)
+
+        gt_ratio = ratio_list.gather(
+            1, cur_stage_idx.unsqueeze(1)
+        ).squeeze(1)
+
+        phase_total_time = all_time.gather(
+            1, cur_stage_idx.unsqueeze(1)
+        ).squeeze(1)
+
+        gt_time = gt_ratio * phase_total_time
+
+        gt_buffer.append(gt_time.cpu().numpy())
+
+        # model predictions
+        for i, model in enumerate(models):
+
+            _, pred_ratio = model(frames)
+
+            pred_ratio = torch.clamp(pred_ratio, 0.0, 1.0)
+
+            pred_time = pred_ratio * phase_total_time
+
+            pred_buffers[i].append(pred_time.cpu().numpy())
+
+    # ---------------- Concat ----------------
+
+    gt_all = np.concatenate(gt_buffer) / 60.0
+
+    pred_all = []
+    for buf in pred_buffers:
+        pred_all.append(np.concatenate(buf) / 60.0)
+
+    total_len = len(gt_all)
+
+    print("Total samples:", total_len)
+
+    # =====================================================
+    # ============== STABLE WINDOW SELECTION ==============
+    # =====================================================
+
+    end_idx = min(START_OFFSET + VIS_WINDOW, total_len)
+
+    gt_all = gt_all[START_OFFSET:end_idx]
+
+    for i in range(len(pred_all)):
+        pred_all[i] = pred_all[i][START_OFFSET:end_idx]
+
+    print("Window range:", START_OFFSET, "->", end_idx)
+
+    # ---------------- Compute MAE (window) ----------------
+
+    maes = []
+
+    for i, cfg in enumerate(MODELS):
+        mae = np.mean(np.abs(pred_all[i] - gt_all))
+        maes.append(mae)
+
+        print(cfg["name"], "MAE(min):", round(mae, 3))
+
+    # ---------------- Plot ----------------
+
+    x = np.arange(len(gt_all))
+
+    plt.figure(figsize=(12, 4))
+
+    # Ground Truth (solid)
+    plt.plot(
+        x,
+        gt_all,
+        linewidth=2.0,
+        label="Ground Truth"
+    )
+
+    # Predictions
+    for i, cfg in enumerate(MODELS):
+
+        plt.plot(
+            x,
+            pred_all[i],
+            linewidth=1.5,
+            label=f"{cfg['name']} (MAE={maes[i]:.2f})"
         )
 
-        # ---------------- Dataset ----------------
+    plt.xlabel("Test Sample Sequence")
+    plt.ylabel("Remaining Time (min)")
+    plt.title("Remaining Time Prediction Comparison (Stable Window)")
 
-        test_dataset = Cholec80DatasetTaskA(
-            root_dir=args.data_root,
-            mode="test",
-            seq_len=args.seq_len,
-            stride=args.stride,
-            transform=transform
-        )
+    plt.ylim(0, 30)
 
-        test_loader = DataLoader(
-            test_dataset,
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=args.num_workers,
-            pin_memory=(device.type == "cuda")
-        )
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
 
-        print("Test samples:", len(test_dataset))
+    save_name = "three_models_window_view_stable.png"
+    plt.savefig(save_name, dpi=300)
+    plt.show()
 
-        # ---------------- Load models ----------------
-
-        backbone_ckpt = os.path.join(
-            "checkpoints", args.backbone_name, "best.pth"
-        )
-
-        head_ckpt = os.path.join(
-            "checkpoints", args.head_name, "best.pth"
-        )
-
-        backbone = build_backbone(args.backbone_model).to(device)
-        head = FutureTimelineModel().to(device)
-
-        backbone.load_state_dict(
-            torch.load(backbone_ckpt, map_location=device)["state_dict"]
-        )
-
-        head.load_state_dict(
-            torch.load(head_ckpt, map_location=device)["state_dict"]
-        )
-
-        # ---------------- Test ----------------
-
-        mae = validate_pipeline(
-            backbone,
-            head,
-            test_loader,
-            device
-        )
-
-        print(f"Temporal Window = {args.seq_len}")
-        print(f"MAE = {mae:.2f} s")
-
-        window_list.append(args.seq_len)
-        mae_list.append(mae)
-
-    # -------------------------------------------------
-    # Save numeric results
-    # -------------------------------------------------
-
-    import json
-
-    json_path = os.path.join(SAVE_DIR, "temporal_window_mae.json")
-
-    with open(json_path, "w") as f:
-        json.dump(
-            dict(zip(window_list, mae_list)),
-            f,
-            indent=4
-        )
-
-    print("\nSaved results:", json_path)
-
-    # -------------------------------------------------
-    # Plot
-    # -------------------------------------------------
-
-    plt.figure(figsize=(6, 4))
-    plt.plot(window_list, mae_list, marker="o")
-    plt.xlabel("Temporal Window Length")
-    plt.ylabel("MAE (seconds)")
-    plt.title("Temporal Window vs MAE")
-    plt.grid(True)
-
-    fig_path = os.path.join(SAVE_DIR, "temporal_window_vs_mae.png")
-    plt.savefig(fig_path, dpi=300, bbox_inches="tight")
-    plt.close()
-
-    print("Saved figure:", fig_path)
+    print("Saved:", save_name)
 
 
 if __name__ == "__main__":

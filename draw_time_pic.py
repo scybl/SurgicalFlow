@@ -8,11 +8,8 @@ import matplotlib.pyplot as plt
 
 DATA_ROOT = "data/cholec80"
 PHASE_DIR = "phase_annotations"
-FPS_ORI = 25          # 原始视频 fps
-DOWNSAMPLE_FPS = 1    # 统计用 1fps
 
-MODE = "train"        # train / val / test
-
+FPS_ORI = 25   # original fps -> downsample to 1fps
 
 PHASE2ID = {
     "Preparation": 1,
@@ -28,7 +25,7 @@ ID2PHASE = {v: k for k, v in PHASE2ID.items()}
 
 
 # -----------------------------
-# Train/Val/Test split (Cholec80 official style)
+# Dataset split
 # -----------------------------
 
 def split_videos(video_list, mode):
@@ -42,11 +39,11 @@ def split_videos(video_list, mode):
     elif mode == "test":
         return video_list[50:80]
     else:
-        raise ValueError("Unknown mode")
+        raise ValueError(mode)
 
 
 # -----------------------------
-# Phase duration extractor
+# Phase duration parser
 # -----------------------------
 
 def extract_phase_duration(phase_file):
@@ -54,14 +51,14 @@ def extract_phase_duration(phase_file):
     with open(phase_file, "r") as f:
         lines = f.readlines()
 
-    # skip header + downsample to 1 fps
+    # skip header + downsample to 1fps
     lines = lines[1::FPS_ORI]
-
-    durations = []
-    phase_ids = []
 
     prev = None
     cur_len = 0
+
+    phase_ids = []
+    durations = []
 
     for line in lines:
 
@@ -69,78 +66,77 @@ def extract_phase_duration(phase_file):
         pid = PHASE2ID[phase_name]
 
         if pid != prev:
-            if prev is not None:
-                durations.append(cur_len)
-                phase_ids.append(prev)
 
-            cur_len = 1
+            if prev is not None:
+                phase_ids.append(prev)
+                durations.append(cur_len)
+
             prev = pid
+            cur_len = 1
+
         else:
             cur_len += 1
 
-    durations.append(cur_len)
     phase_ids.append(prev)
+    durations.append(cur_len)
 
     return phase_ids, durations
 
 
 # -----------------------------
-# Main statistics pipeline
+# Statistics
 # -----------------------------
 
-def compute_all_phase_stats():
+def compute_split_stats(mode):
 
     phase_root = os.path.join(DATA_ROOT, PHASE_DIR)
+    all_files = os.listdir(phase_root)
 
-    phase_files = os.listdir(phase_root)
+    used_files = split_videos(all_files, mode)
 
-    used_files = split_videos(phase_files, MODE)
+    print(f"[{mode}] videos:", len(used_files))
 
-    print(f"[INFO] Using {MODE} set: {len(used_files)} videos")
-
-    phase_pool = {i: [] for i in range(1, 8)}
+    pool = {i: [] for i in range(1, 8)}
 
     for fname in used_files:
 
-        phase_path = os.path.join(phase_root, fname)
+        path = os.path.join(phase_root, fname)
 
-        phase_ids, durations = extract_phase_duration(phase_path)
+        phase_ids, durations = extract_phase_duration(path)
 
         for pid, dur in zip(phase_ids, durations):
-            phase_pool[pid].append(dur)
+            pool[pid].append(dur)
 
-    return phase_pool
+    means = []
+
+    for pid in range(1, 8):
+        means.append(np.mean(pool[pid]))
+
+    return np.array(means)
 
 
 # -----------------------------
 # Plot
 # -----------------------------
 
-def plot_bar(phase_pool):
+def plot_compare(train_mean, val_mean, test_mean):
 
-    names = []
-    means = []
+    phases = [ID2PHASE[i] for i in range(1, 8)]
 
-    print("\n===== Phase Statistics =====")
+    x = np.arange(len(phases))
+    width = 0.25
 
-    for pid in sorted(phase_pool.keys()):
+    plt.figure(figsize=(9, 4.5))
 
-        arr = np.array(phase_pool[pid])
+    plt.bar(x - width, train_mean, width, label="Train")
+    plt.bar(x, val_mean, width, label="Val")
+    plt.bar(x + width, test_mean, width, label="Test")
 
-        mean_val = arr.mean()
-
-        phase_name = ID2PHASE[pid]
-
-        print(f"{phase_name:25s} mean = {mean_val:.2f} s")
-
-        names.append(phase_name)
-        means.append(mean_val)
-
-    plt.figure(figsize=(10, 5))
-    plt.bar(names, means)
     plt.ylabel("Duration (seconds)")
-    plt.title(f"Average Phase Duration ({MODE} set)")
-    plt.xticks(rotation=25)
+    plt.title("Phase Duration Comparison (Train / Val / Test)")
+    plt.xticks(x, phases, rotation=20)
+    plt.legend()
+
     plt.tight_layout()
     plt.show()
 
@@ -151,6 +147,18 @@ def plot_bar(phase_pool):
 
 if __name__ == "__main__":
 
-    phase_pool = compute_all_phase_stats()
+    train_mean = compute_split_stats("train")
+    val_mean = compute_split_stats("val")
+    test_mean = compute_split_stats("test")
 
-    plot_bar(phase_pool)
+    print("\n===== Mean Phase Duration (seconds) =====")
+
+    for i in range(7):
+        print(
+            f"{ID2PHASE[i+1]:25s} "
+            f"Train={train_mean[i]:.1f}  "
+            f"Val={val_mean[i]:.1f}  "
+            f"Test={test_mean[i]:.1f}"
+        )
+
+    plot_compare(train_mean, val_mean, test_mean)
