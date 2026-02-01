@@ -10,7 +10,7 @@ import numpy as np
 from sklearn.metrics import r2_score
 from tqdm import tqdm
 
-from task1_data_loader import Cholec80DatasetTaskA
+from taskA_data_loader import Cholec80DatasetTaskA
 from model_backbone import TaskA_CNN, TaskA_CNN_LSTM
 from model_out_head import FutureTimelineModel
 import matplotlib.pyplot as plt

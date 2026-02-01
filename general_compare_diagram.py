@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from task1_data_loader import Cholec80DatasetTaskA
+from taskA_data_loader import Cholec80DatasetTaskA
 from model_backbone import TaskA_CNN, TaskA_CNN_LSTM
 
 

@@ -11,11 +11,12 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-from task1_data_loader import Cholec80DatasetTaskA
-from model_out_head import FutureTimelineModel
+from taskB_data_loader import Cholec80DatasetTaskB
+from model_out_head import ToolPredictionModel
 
 
 NUM_PHASES = 7
+NUM_TOOLS = 7
 
 
 # -------------------------------------------------
@@ -92,53 +93,6 @@ def setup_logger(log_dir):
 
 
 # -------------------------------------------------
-# Build GT timeline (NO constraint)
-# -------------------------------------------------
-
-def build_gt_future(cur_stage_idx, ratio_list, stage_order, all_time):
-
-    """
-    Build ground-truth cumulative future timeline
-
-    Output:
-        gt_future: [B,7]
-    """
-
-    B = cur_stage_idx.shape[0]
-
-    gt_future = torch.zeros(
-        (B, NUM_PHASES),
-        device=cur_stage_idx.device
-    )
-
-    for b in range(B):
-
-        cur = int(cur_stage_idx[b].item())
-
-        if cur == 0:
-            continue
-
-        idx = cur - 1
-
-        # current stage remaining
-        remain = ratio_list[b, idx] * all_time[b, idx]
-
-        acc = remain
-        gt_future[b, idx] = acc
-
-        # following stages
-        for j in range(idx + 1, NUM_PHASES):
-
-            if stage_order[b, j] == 0:
-                continue
-
-            acc = acc + all_time[b, j]
-            gt_future[b, j] = acc
-
-    return gt_future
-
-
-# -------------------------------------------------
 # Main
 # -------------------------------------------------
 
@@ -175,20 +129,20 @@ def main():
 
     # ---------------- Dataset ----------------
 
-    train_dataset = Cholec80DatasetTaskA(
+    train_dataset = Cholec80DatasetTaskB(
         root_dir=args.data_root,
         mode="train",
         seq_len=args.seq_len,
         stride=args.stride,
-        transform=transform,
+        transform=transform
     )
 
-    val_dataset = Cholec80DatasetTaskA(
+    val_dataset = Cholec80DatasetTaskB(
         root_dir=args.data_root,
         mode="val",
         seq_len=args.seq_len,
         stride=args.stride,
-        transform=transform,
+        transform=transform
     )
 
     train_loader = DataLoader(
@@ -209,72 +163,73 @@ def main():
     logger.info(f"Train samples: {len(train_dataset)}")
     logger.info(f"Val samples: {len(val_dataset)}")
 
-    # ---------------- Model ----------------
+    # ---------------- Task2 Out Head ----------------
 
-    model = FutureTimelineModel().to(device)
+    model = ToolPredictionModel(
+        hidden_dim=128,
+        num_phases=NUM_PHASES,
+        num_tools=NUM_TOOLS
+    ).to(device)
 
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=args.lr
     )
 
-    criterion = nn.SmoothL1Loss()
+    criterion = nn.BCEWithLogitsLoss()
 
     best_val = float("inf")
 
     train_curve = []
     val_curve = []
 
-    # ==========================================================
+    # ==================================================
     # Training Loop
-    # ==========================================================
+    # ==================================================
 
     for epoch in range(args.epochs):
 
-        model.train()
+        # ---------------- Train ----------------
 
+        model.train()
         running_loss = 0.0
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}")
 
         for batch in pbar:
 
-            frames, stage_order, ratio_list, all_time = batch
+            frames, stage_order, ratio_list, all_time, tool_gt = batch
 
             stage_order = stage_order.to(device)
             ratio_list = ratio_list.to(device)
             all_time = all_time.to(device)
+            tool_gt = tool_gt.to(device)
 
-            # ---------------- current stage ----------------
+            # ---------- compute current stage ----------
 
             mask = (ratio_list > 0)
             cur_stage_idx = mask.float().argmax(dim=1) + 1   # [B]
 
-            ratio_input = ratio_list.gather(
+            # ---------- compute remaining time ----------
+
+            phase_remain = ratio_list.gather(
+                1, (cur_stage_idx - 1).unsqueeze(1)
+            ) * all_time.gather(
                 1, (cur_stage_idx - 1).unsqueeze(1)
             )
 
-            # ---------------- forward ----------------
+            phase_remain = phase_remain.squeeze(1)   # [B]
 
-            raw_future = model(
+            # ---------- forward ----------
+
+            pred_tool = model(
                 cur_stage_idx,
-                ratio_input,
-                stage_order,
-                all_time
+                phase_remain
             )
 
-            # ---------------- GT ----------------
+            # ---------- loss ----------
 
-            gt_future = build_gt_future(
-                cur_stage_idx,
-                ratio_list,
-                stage_order,
-                all_time
-            )
-
-            # ---------------- loss ----------------
-
-            loss = criterion(raw_future, gt_future)
+            loss = criterion(pred_tool, tool_gt)
 
             optimizer.zero_grad()
             loss.backward()
@@ -287,9 +242,7 @@ def main():
         avg_train = running_loss / len(train_loader)
         train_curve.append(avg_train)
 
-        logger.info(
-            f"Epoch {epoch+1} Train Loss: {avg_train:.4f}"
-        )
+        logger.info(f"Epoch {epoch+1} Train Loss: {avg_train:.4f}")
 
         # ---------------- Validation ----------------
 
@@ -300,41 +253,35 @@ def main():
 
             for batch in val_loader:
 
-                frames, stage_order, ratio_list, all_time = batch
+                frames, stage_order, ratio_list, all_time, tool_gt = batch
 
                 stage_order = stage_order.to(device)
                 ratio_list = ratio_list.to(device)
                 all_time = all_time.to(device)
+                tool_gt = tool_gt.to(device)
 
                 mask = (ratio_list > 0)
                 cur_stage_idx = mask.float().argmax(dim=1) + 1
 
-                ratio_input = ratio_list.gather(
+                phase_remain = ratio_list.gather(
+                    1, (cur_stage_idx - 1).unsqueeze(1)
+                ) * all_time.gather(
                     1, (cur_stage_idx - 1).unsqueeze(1)
                 )
 
-                raw_future = model(
+                phase_remain = phase_remain.squeeze(1)
+
+                pred_tool = model(
                     cur_stage_idx,
-                    ratio_input,
-                    stage_order,
-                    all_time
+                    phase_remain
                 )
 
-                gt_future = build_gt_future(
-                    cur_stage_idx,
-                    ratio_list,
-                    stage_order,
-                    all_time
-                )
-
-                val_running += criterion(raw_future, gt_future).item()
+                val_running += criterion(pred_tool, tool_gt).item()
 
         val_loss = val_running / len(val_loader)
         val_curve.append(val_loss)
 
-        logger.info(
-            f"Epoch {epoch+1} Val Loss: {val_loss:.4f}"
-        )
+        logger.info(f"Epoch {epoch+1} Val Loss: {val_loss:.4f}")
 
         # ---------------- Save best ----------------
 
@@ -355,9 +302,9 @@ def main():
 
             logger.info("Saved new best checkpoint")
 
-    # ==========================================================
+    # ==================================================
     # Finished
-    # ==========================================================
+    # ==================================================
 
     logger.info(f"Training finished. Best Val Loss: {best_val:.4f}")
 

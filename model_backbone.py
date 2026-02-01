@@ -4,7 +4,6 @@ import torch.nn.functional as F
 
 import torch
 import torch.nn as nn
-from torchvision.models import resnet34
 
 
 class TaskA_CNN(nn.Module):

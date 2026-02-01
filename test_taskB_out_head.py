@@ -11,7 +11,7 @@ from tqdm import tqdm
 from sklearn.metrics import f1_score, accuracy_score
 
 from model_backbone import TaskA_CNN, TaskA_CNN_LSTM
-from task2_data_loader import Cholec80DatasetTaskB
+from taskB_data_loader import Cholec80DatasetTaskB
 from model_out_head import ToolPredictionModel
 
 
