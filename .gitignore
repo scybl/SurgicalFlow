@@ -1,5 +1,7 @@
 data/
 checkpoints/
+outputs/
+three_models_window_view_stable.png
 .DS_Store
 
 # Byte-compiled / optimized / DLL files

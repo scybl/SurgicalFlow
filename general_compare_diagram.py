@@ -19,26 +19,26 @@ MODELS = [
 
     {
         "name": "CNN Baseline",
-        "exp": "cnn_version4",      # checkpoints/cnn_baseline/best.pth
+        "exp": "backbone_cnn",
         "model": "cnn",
         "seq_len": 16,
         "stride": 8,
     },
 
     {
-        "name": "CNN-LSTM (N=32)",
-        "exp": "cnn_LSTM_version4_32",           # checkpoints/lstm_16/best.pth
-        "model": "cnn_lstm",
-        "seq_len": 32,
-        "stride": 16,
-    },
-
-    {
         "name": "CNN-LSTM (N=16)",
-        "exp": "cnn_LSTM_version4",           # checkpoints/lstm_32/best.pth
+        "exp": "backbone_cnn_lstm_16",
         "model": "cnn_lstm",
         "seq_len": 16,
         "stride": 8,
+    },
+
+    {
+        "name": "CNN-LSTM (N=32)",
+        "exp": "backbone_cnn_lstm_32",
+        "model": "cnn_lstm",
+        "seq_len": 32,
+        "stride": 16,
     },
 
 ]
@@ -66,6 +66,7 @@ def parse_args():
     parser.add_argument("--num_workers", type=int, default=8)
 
     parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--output", type=str, default="outputs/remaining_time_comparison.png")
 
     return parser.parse_args()
 
@@ -199,7 +200,9 @@ def main():
         # model predictions
         for i, model in enumerate(models):
 
-            _, pred_ratio = model(frames)
+            model_frames = frames[:, -MODELS[i]["seq_len"]:]
+
+            _, pred_ratio = model(model_frames)
 
             pred_ratio = torch.clamp(pred_ratio, 0.0, 1.0)
 
@@ -276,7 +279,11 @@ def main():
     plt.grid(alpha=0.3)
     plt.tight_layout()
 
-    save_name = "three_models_window_view_stable.png"
+    save_name = args.output
+    output_dir = os.path.dirname(save_name)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
     plt.savefig(save_name, dpi=300)
     plt.show()
 

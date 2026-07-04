@@ -256,14 +256,14 @@ def main():
 
     logger.info("========== TEST RESULT ==========")
     logger.info(f"Phase Acc: {test_acc:.4f}")
-    logger.info(f"Remain MAE (ratio): {test_mae:.4f}")
+    logger.info(f"Remain MAE (s): {test_mae:.4f}")
     logger.info(f"R2: {test_r2:.4f}")
 
     # ---------------- Save result ----------------
 
     result_dict = {
         "phase_acc": float(test_acc),
-        "mae_ratio": float(test_mae),
+        "mae_seconds": float(test_mae),
         "r2": float(test_r2)
     }
 

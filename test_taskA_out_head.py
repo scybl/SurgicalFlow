@@ -168,6 +168,7 @@ def validate_pipeline(backbone, head, loader, device):
 
         mask = (ratio_list > 0)
         cur_stage_idx = mask.float().argmax(dim=1)   # [B] (0-based)
+        cur_stage_id = cur_stage_idx + 1             # [B] (1-based)
 
         phase_gt = stage_order.gather(
             1, cur_stage_idx.unsqueeze(1)
@@ -206,7 +207,7 @@ def validate_pipeline(backbone, head, loader, device):
         # ======================================================
 
         gt_future = build_gt_future(
-            cur_stage_idx,
+            cur_stage_id,
             ratio_list,
             stage_order,
             all_time
