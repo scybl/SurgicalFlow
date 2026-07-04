@@ -67,6 +67,33 @@ Install the PyTorch build that matches the local CUDA or CPU runtime if the defa
 
 The code expects the Cholec80 data to be prepared locally. Dataset files are not included in this repository.
 
+Prepare the dataset with the CAMMA TF-Cholec80 scripts:
+
+```bash
+git clone https://github.com/CAMMA-public/TF-Cholec80.git
+cd TF-Cholec80
+python prepare.py --data_rootdir /absolute/path/to/datasets
+```
+
+`prepare.py` downloads and extracts Cholec80 to `/absolute/path/to/datasets/cholec80`. The official script also supports `--verify_checksum` for archive verification and `--keep_archive` if the downloaded archive should be retained after extraction. Make sure enough disk space is available before running the download and extraction step.
+
+After preparation, either pass the extracted directory explicitly:
+
+```bash
+python train_backbone.py \
+  --name backbone_cnn \
+  --epochs 25 \
+  --model cnn \
+  --data_root /absolute/path/to/datasets/cholec80
+```
+
+Or link/copy it to the default location expected by this repository:
+
+```bash
+mkdir -p data
+ln -s /absolute/path/to/datasets/cholec80 data/cholec80
+```
+
 Expected layout:
 
 ```text

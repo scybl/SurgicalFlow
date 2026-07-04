@@ -67,6 +67,33 @@ pip install -r requirements.txt
 
 代码默认读取本地准备好的 Cholec80 数据。本仓库不包含数据集文件。
 
+使用 CAMMA TF-Cholec80 脚本准备数据集：
+
+```bash
+git clone https://github.com/CAMMA-public/TF-Cholec80.git
+cd TF-Cholec80
+python prepare.py --data_rootdir /absolute/path/to/datasets
+```
+
+`prepare.py` 会将 Cholec80 下载并解压到 `/absolute/path/to/datasets/cholec80`。官方脚本还支持使用 `--verify_checksum` 校验下载归档，或使用 `--keep_archive` 在解压后保留下载归档。运行下载和解压步骤前，请确认本地有足够磁盘空间。
+
+准备完成后，可以在运行训练或测试脚本时显式传入解压后的目录：
+
+```bash
+python train_backbone.py \
+  --name backbone_cnn \
+  --epochs 25 \
+  --model cnn \
+  --data_root /absolute/path/to/datasets/cholec80
+```
+
+也可以将数据目录链接或复制到本仓库默认读取的位置：
+
+```bash
+mkdir -p data
+ln -s /absolute/path/to/datasets/cholec80 data/cholec80
+```
+
 期望目录结构如下：
 
 ```text
