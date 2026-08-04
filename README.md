@@ -1,88 +1,82 @@
 # SurgicalFlow
 
-[中文文档](README.zh-CN.md)
+[English](README_en.md)
 
-SurgicalFlow implements a PyTorch pipeline for temporal surgical workflow prediction on Cholec80-style laparoscopic cholecystectomy data. It compares a frame-aggregated CNN baseline with CNN-LSTM temporal models and evaluates how input window length affects workflow prediction stability.
+SurgicalFlow 实现了一个基于 PyTorch 的时序手术流程预测流程，面向 Cholec80 格式的腹腔镜胆囊切除术数据。代码比较了基于帧特征聚合的 CNN 基线与 CNN-LSTM 时序模型，并评估输入时间窗口长度对流程预测稳定性的影响。
 
-The workflow covers three connected objectives:
+整体流程覆盖三个相互关联的目标：
 
-- Current surgical phase classification.
-- Remaining time regression for the current phase.
-- Downstream timeline and tool-presence prediction from phase/time context.
+- 当前手术阶段分类。
+- 当前阶段剩余时间回归。
+- 基于阶段与时间上下文的未来阶段时间线预测和器械使用预测。
 
-## Highlights
+## 核心功能
 
-- Cholec80 frame, phase, and tool annotation loaders with a fixed train/val/test split of 40/10/30 videos.
-- CNN and CNN-LSTM backbones trained with a multi-task loss for phase classification and normalized remaining-time regression.
-- Separate output heads for future phase timeline estimation and multi-label tool recognition.
-- Experiment artifacts saved as configs, logs, checkpoints, curves, JSON metrics, and optional visualization data.
-- Reproducible command-line entry points for training, testing, and comparison.
+- 支持 Cholec80 帧数据、阶段标注和器械标注读取，默认使用 40/10/30 个视频的训练、验证和测试划分。
+- 提供 CNN 与 CNN-LSTM 主干模型，并使用多任务损失联合优化阶段分类和归一化剩余时间回归。
+- 提供独立输出头，用于未来阶段时间线估计和多标签器械识别。
+- 训练与测试产物包含配置、日志、检查点、曲线图、JSON 指标和可选的可视化数据。
+- 所有训练、测试和对比流程均通过命令行入口运行。
 
-## Quick Start Index
+## 快速上手索引
 
-| Need | Command |
+| 目标 | 命令 |
 | --- | --- |
-| Code structure check | `bash scripts/check_project.sh` |
-| Reuse shared conda env | `conda run -n codex_python bash scripts/check_project.sh` |
-| Run lightweight tests | `conda run -n codex_python pytest tests/ -q` |
-| Inspect phase patterns | `python checkdata.py --phase_dir data/cholec80/phase_annotations --output outputs/phase_transition_patterns.png` |
-| Train a backbone | `python train_backbone.py --name backbone_cnn --epochs 25 --model cnn` |
+| 代码结构检查 | `bash scripts/check_project.sh` |
+| 复用共享 conda 环境 | `conda run -n codex_python bash scripts/check_project.sh` |
+| 运行轻量测试 | `conda run -n codex_python pytest tests/ -q` |
+| 检查阶段转移模式 | `python checkdata.py --phase_dir data/cholec80/phase_annotations --output outputs/phase_transition_patterns.png` |
+| 训练 backbone | `python train_backbone.py --name backbone_cnn --epochs 25 --model cnn` |
 
-## Method Overview
+## 方法概述
 
-The backbone receives a sliding temporal window of sampled video frames. A CNN extracts per-frame visual features. The CNN baseline averages those features across time, while the CNN-LSTM model uses the final LSTM state as the temporal representation. The shared representation is optimized for phase classification and current-phase remaining-time regression.
+主干模型接收由滑动窗口采样得到的视频帧序列。CNN 负责提取每帧视觉特征。CNN 基线对时间维度进行平均聚合，CNN-LSTM 模型则使用最后一个 LSTM 状态作为时序表示。共享表示同时用于阶段分类和当前阶段剩余时间回归。
 
-![Training pipeline](picture/train_pipeline.png)
+![训练流程](picture/train_pipeline.png)
 
-The output heads use the predicted phase and remaining-time context to estimate future phase boundaries and tool presence. This keeps visual representation learning separate from lightweight structured prediction heads.
+输出头使用预测得到的阶段和剩余时间上下文，进一步估计未来阶段边界和器械使用情况。这样的设计将视觉表示学习与轻量结构化预测头分开。
 
-## Repository Layout
+## 仓库结构
 
 ```text
 .
 |-- README.md
-|-- README.zh-CN.md
+|-- README_en.md
 |-- requirements.txt
-|-- checkdata.py                 # Phase transition pattern analysis
-|-- general_compare_diagram.py   # Remaining-time comparison plot
-|-- model_backbone.py            # CNN and CNN-LSTM backbone models
-|-- model_out_head.py            # Timeline and tool output heads
-|-- taskA_data_loader.py         # Phase/time dataset loader
-|-- taskB_data_loader.py         # Phase/time/tool dataset loader
-|-- test_backbone.py             # Backbone evaluation
-|-- test_taskA_out_head.py       # Timeline-head pipeline evaluation
-|-- test_taskB_out_head.py       # Tool-head pipeline evaluation
-|-- train_backbone.py            # Backbone training
-|-- train_taskA_out_head.py      # Timeline-head training
-|-- train_taskB_out_head.py      # Tool-head training
+|-- checkdata.py                 # 阶段转移模式分析
+|-- general_compare_diagram.py   # 剩余时间预测对比图
+|-- model_backbone.py            # CNN 与 CNN-LSTM 主干模型
+|-- model_out_head.py            # 时间线与器械输出头
+|-- taskA_data_loader.py         # 阶段/时间数据读取
+|-- taskB_data_loader.py         # 阶段/时间/器械数据读取
+|-- test_backbone.py             # 主干模型评估
+|-- test_taskA_out_head.py       # 时间线输出头流水线评估
+|-- test_taskB_out_head.py       # 器械输出头流水线评估
+|-- train_backbone.py            # 主干模型训练
+|-- train_taskA_out_head.py      # 时间线输出头训练
+|-- train_taskB_out_head.py      # 器械输出头训练
 `-- picture/
     |-- compare.jpg
     `-- train_pipeline.png
 ```
 
-## Environment
+## 环境配置
 
-Python 3.10 is recommended.
+推荐使用 Python 3.10。
 
-One-command setup:
-
-```bash
-bash scripts/setup_env.sh
-```
-
-Quick code-structure check:
+一键结构检查：
 
 ```bash
 bash scripts/check_project.sh
 ```
 
-To reuse a shared conda environment:
+如果已经有共享 conda 环境，可以直接复用：
 
 ```bash
 conda run -n codex_python bash scripts/check_project.sh
 ```
 
-Manual setup:
+手动安装：
 
 ```bash
 python -m venv .venv
@@ -91,13 +85,13 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Install the PyTorch build that matches the local CUDA or CPU runtime if the default package index does not match the target machine.
+如果默认包源中的 PyTorch 版本与本机 CUDA 或 CPU 运行环境不匹配，请安装与目标机器对应的 PyTorch 构建版本。
 
-## Dataset
+## 数据集
 
-The code expects the Cholec80 data to be prepared locally. Dataset files are not included in this repository.
+代码默认读取本地准备好的 Cholec80 数据。本仓库不包含数据集文件。
 
-Prepare the dataset with the CAMMA TF-Cholec80 scripts:
+使用 CAMMA TF-Cholec80 脚本准备数据集：
 
 ```bash
 git clone https://github.com/CAMMA-public/TF-Cholec80.git
@@ -105,9 +99,9 @@ cd TF-Cholec80
 python prepare.py --data_rootdir /absolute/path/to/datasets
 ```
 
-`prepare.py` downloads and extracts Cholec80 to `/absolute/path/to/datasets/cholec80`. The official script also supports `--verify_checksum` for archive verification and `--keep_archive` if the downloaded archive should be retained after extraction. Make sure enough disk space is available before running the download and extraction step.
+`prepare.py` 会将 Cholec80 下载并解压到 `/absolute/path/to/datasets/cholec80`。官方脚本还支持使用 `--verify_checksum` 校验下载归档，或使用 `--keep_archive` 在解压后保留下载归档。运行下载和解压步骤前，请确认本地有足够磁盘空间。
 
-After preparation, either pass the extracted directory explicitly:
+准备完成后，可以在运行训练或测试脚本时显式传入解压后的目录：
 
 ```bash
 python train_backbone.py \
@@ -117,14 +111,14 @@ python train_backbone.py \
   --data_root /absolute/path/to/datasets/cholec80
 ```
 
-Or link/copy it to the default location expected by this repository:
+也可以将数据目录链接或复制到本仓库默认读取的位置：
 
 ```bash
 mkdir -p data
 ln -s /absolute/path/to/datasets/cholec80 data/cholec80
 ```
 
-Expected layout:
+期望目录结构如下：
 
 ```text
 data/cholec80/
@@ -142,9 +136,9 @@ data/cholec80/
     `-- ...
 ```
 
-If using the CAMMA TF-Cholec80 preparation scripts, place the prepared output under `data/cholec80` or pass a custom path with `--data_root`.
+如果使用 CAMMA TF-Cholec80 准备脚本，可将处理后的数据放在 `data/cholec80` 下，或通过 `--data_root` 指定自定义路径。
 
-Inspect phase-transition patterns:
+检查阶段转移模式：
 
 ```bash
 python checkdata.py \
@@ -152,9 +146,9 @@ python checkdata.py \
   --output outputs/phase_transition_patterns.png
 ```
 
-## Training
+## 训练
 
-Train a CNN backbone:
+训练 CNN 主干模型：
 
 ```bash
 python train_backbone.py \
@@ -163,7 +157,7 @@ python train_backbone.py \
   --model cnn
 ```
 
-Train CNN-LSTM backbones with different temporal windows:
+使用不同时间窗口训练 CNN-LSTM 主干模型：
 
 ```bash
 python train_backbone.py \
@@ -181,7 +175,7 @@ python train_backbone.py \
   --stride 16
 ```
 
-Train the structured output heads:
+训练结构化输出头：
 
 ```bash
 python train_taskA_out_head.py \
@@ -197,17 +191,17 @@ python train_taskB_out_head.py \
   --stride 8
 ```
 
-Training writes artifacts to `checkpoints/<experiment_name>/`, including:
+训练产物写入 `checkpoints/<experiment_name>/`，包括：
 
 - `best.pth`
 - `config.json`
 - `train.log`
-- `training_curve.png` for backbones
-- `loss_curve.png` for output heads
+- 主干模型的 `training_curve.png`
+- 输出头的 `loss_curve.png`
 
-## Evaluation
+## 评估
 
-Evaluate a trained backbone:
+评估已训练的主干模型：
 
 ```bash
 python test_backbone.py \
@@ -217,7 +211,7 @@ python test_backbone.py \
   --stride 8
 ```
 
-Evaluate the timeline pipeline with a trained backbone and timeline head:
+使用已训练主干和时间线输出头评估完整时间线流程：
 
 ```bash
 python test_taskA_out_head.py \
@@ -228,7 +222,7 @@ python test_taskA_out_head.py \
   --stride 8
 ```
 
-Evaluate the tool-recognition pipeline:
+评估器械识别流程：
 
 ```bash
 python test_taskB_out_head.py \
@@ -239,17 +233,17 @@ python test_taskB_out_head.py \
   --stride 8
 ```
 
-Evaluation writes `test.log` and `test_result.json` to the relevant checkpoint directory. The timeline evaluation also writes `future_timeline_data.npz`.
+评估结果会写入对应检查点目录中的 `test.log` 和 `test_result.json`。时间线评估还会写入 `future_timeline_data.npz`。
 
-## Metrics
+## 指标
 
-- Backbone evaluation reports phase accuracy, remaining-time MAE in seconds, and R2 for current-phase remaining-time prediction.
-- Timeline-head evaluation reports phase accuracy, start-time MAE, end-time MAE, and R2 over valid future timeline points.
-- Tool-head evaluation reports tool accuracy, micro-F1, and macro-F1 for multi-label tool presence.
+- 主干模型评估输出阶段准确率、以秒为单位的剩余时间 MAE，以及当前阶段剩余时间预测的 R2。
+- 时间线输出头评估输出阶段准确率、开始时间 MAE、结束时间 MAE，以及有效未来时间线点上的 R2。
+- 器械输出头评估输出器械准确率、micro-F1 和 macro-F1，用于多标签器械使用预测。
 
-## Temporal Window Comparison
+## 时间窗口对比
 
-`general_compare_diagram.py` compares multiple trained backbones on the same test subset and plots remaining-time predictions against ground truth. Update the `MODELS` list at the top of the file if experiment names differ from the defaults.
+`general_compare_diagram.py` 会在同一测试子集上比较多个已训练主干模型，并绘制剩余时间预测与真实值的对比图。如果实验名称与默认值不同，请修改文件顶部的 `MODELS` 列表。
 
 ```bash
 python general_compare_diagram.py \
@@ -258,42 +252,34 @@ python general_compare_diagram.py \
   --output outputs/remaining_time_comparison.png
 ```
 
-An example comparison figure is included at `picture/compare.jpg`.
+示例对比图位于 `picture/compare.jpg`。
 
-![Remaining-time comparison](picture/compare.jpg)
+![剩余时间对比](picture/compare.jpg)
 
-## Reproducibility Notes
+## 可复现性说明
 
-- Scripts set Python, NumPy, and PyTorch random seeds through `--seed`.
-- CUDA falls back to CPU automatically when a CUDA device is unavailable.
-- Frames are sampled at 1 FPS by reading every 25th annotation entry.
-- The default split uses videos `1-40` for training, `41-50` for validation, and `51-80` for testing after lexicographic sorting of video folders.
-- `data/`, `checkpoints/`, and generated output folders are excluded from version control.
+- 脚本通过 `--seed` 设置 Python、NumPy 和 PyTorch 随机种子。
+- 当 CUDA 不可用时，脚本会自动回退到 CPU。
+- 代码通过每 25 条标注读取一次，将视频帧按 1 FPS 采样。
+- 默认划分在视频文件夹按字典序排序后，使用第 `1-40` 个视频训练，第 `41-50` 个视频验证，第 `51-80` 个视频测试。
+- `data/`、`checkpoints/` 和生成输出目录不纳入版本控制。
 
-## Main Arguments
+## 主要参数
 
-| Argument | Used by | Default | Description |
+| 参数 | 使用位置 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `--name` | training scripts, `test_backbone.py` | required | Experiment name and checkpoint subdirectory |
-| `--epochs` | training scripts | required | Number of training epochs |
-| `--model` | backbone train/test | required | `cnn` or `cnn_lstm` |
-| `--backbone_name` | output-head tests | required | Backbone checkpoint directory |
-| `--head_name` | output-head tests | required | Output-head checkpoint directory |
-| `--backbone_model` | output-head tests | required | Backbone architecture used by the checkpoint |
-| `--data_root` | all training/testing scripts | `data/cholec80` | Dataset root |
-| `--batch_size` | all training/testing scripts | `16` | Batch size |
-| `--lr` | training scripts | `1e-4` | Adam learning rate |
-| `--seq_len` | sequence scripts | `16` | Number of frames per temporal window |
-| `--stride` | sequence scripts | `8` | Sliding-window stride |
-| `--num_workers` | data loaders | `8` | DataLoader worker count |
-| `--save_dir` | backbone train/test, comparison | `checkpoints` | Artifact root |
-| `--device` | all training/testing scripts | `cuda` | Requested device |
-| `--seed` | all training/testing scripts | `42` | Random seed |
-
-## Result Snapshot
-
-| Experiment | Metric focus | Included evidence |
-| --- | --- | --- |
-| CNN baseline | Current phase accuracy and remaining-time MAE | training and test scripts |
-| CNN-LSTM temporal model | Stability across 16/32-frame windows | `picture/compare.jpg` |
-| Structured output heads | Future timeline and tool-presence prediction | head training/evaluation scripts |
+| `--name` | 训练脚本、`test_backbone.py` | 必填 | 实验名称与检查点子目录 |
+| `--epochs` | 训练脚本 | 必填 | 训练轮数 |
+| `--model` | 主干训练/测试 | 必填 | `cnn` 或 `cnn_lstm` |
+| `--backbone_name` | 输出头测试 | 必填 | 主干模型检查点目录 |
+| `--head_name` | 输出头测试 | 必填 | 输出头检查点目录 |
+| `--backbone_model` | 输出头测试 | 必填 | 检查点对应的主干架构 |
+| `--data_root` | 所有训练/测试脚本 | `data/cholec80` | 数据集根目录 |
+| `--batch_size` | 所有训练/测试脚本 | `16` | 批大小 |
+| `--lr` | 训练脚本 | `1e-4` | Adam 学习率 |
+| `--seq_len` | 序列脚本 | `16` | 每个时间窗口的帧数 |
+| `--stride` | 序列脚本 | `8` | 滑动窗口步长 |
+| `--num_workers` | 数据加载 | `8` | DataLoader 工作进程数 |
+| `--save_dir` | 主干训练/测试、对比图脚本 | `checkpoints` | 产物根目录 |
+| `--device` | 所有训练/测试脚本 | `cuda` | 请求使用的设备 |
+| `--seed` | 所有训练/测试脚本 | `42` | 随机种子 |
