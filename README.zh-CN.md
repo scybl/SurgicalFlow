@@ -54,6 +54,20 @@
 
 推荐使用 Python 3.10。
 
+一键结构检查：
+
+```bash
+bash scripts/check_project.sh
+```
+
+如果已经有共享 conda 环境，可以直接复用：
+
+```bash
+conda run -n codex_python bash scripts/check_project.sh
+```
+
+手动安装：
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate

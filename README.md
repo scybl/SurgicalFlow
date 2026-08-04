@@ -66,6 +66,12 @@ Quick code-structure check:
 bash scripts/check_project.sh
 ```
 
+To reuse a shared conda environment:
+
+```bash
+conda run -n codex_python bash scripts/check_project.sh
+```
+
 Manual setup:
 
 ```bash

@@ -4,13 +4,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-if [[ -f .venv/bin/activate ]]; then
+if [[ -z "${PYTHON_BIN:-}" && -f .venv/bin/activate ]]; then
   source .venv/bin/activate
 fi
 
+PYTHON_BIN="${PYTHON_BIN:-python}"
 PYCACHE_DIR="${PYTHONPYCACHEPREFIX:-${TMPDIR:-/tmp}/surgical_workflow_prediction_pycache}"
 
-PYTHONPYCACHEPREFIX="$PYCACHE_DIR" python -m py_compile \
+PYTHONPYCACHEPREFIX="$PYCACHE_DIR" "$PYTHON_BIN" -m py_compile \
   model_backbone.py \
   model_out_head.py \
   taskA_data_loader.py \
