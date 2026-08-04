@@ -1,8 +1,8 @@
-# Temporal Surgical Workflow Prediction
+# SurgicalFlow
 
 [中文文档](README.zh-CN.md)
 
-This repository implements a PyTorch pipeline for temporal surgical workflow prediction on Cholec80-style laparoscopic cholecystectomy data. It compares a frame-aggregated CNN baseline with CNN-LSTM temporal models and evaluates how input window length affects workflow prediction stability.
+SurgicalFlow implements a PyTorch pipeline for temporal surgical workflow prediction on Cholec80-style laparoscopic cholecystectomy data. It compares a frame-aggregated CNN baseline with CNN-LSTM temporal models and evaluates how input window length affects workflow prediction stability.
 
 The workflow covers three connected objectives:
 

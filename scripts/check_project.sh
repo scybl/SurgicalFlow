@@ -9,7 +9,7 @@ if [[ -z "${PYTHON_BIN:-}" && -f .venv/bin/activate ]]; then
 fi
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
-PYCACHE_DIR="${PYTHONPYCACHEPREFIX:-${TMPDIR:-/tmp}/surgical_workflow_prediction_pycache}"
+PYCACHE_DIR="${PYTHONPYCACHEPREFIX:-${TMPDIR:-/tmp}/SurgicalFlow_pycache}"
 
 PYTHONPYCACHEPREFIX="$PYCACHE_DIR" "$PYTHON_BIN" -m py_compile \
   model_backbone.py \
