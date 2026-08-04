@@ -128,6 +128,14 @@ data/cholec80/
 
 If using the CAMMA TF-Cholec80 preparation scripts, place the prepared output under `data/cholec80` or pass a custom path with `--data_root`.
 
+Inspect phase-transition patterns:
+
+```bash
+python checkdata.py \
+  --phase_dir data/cholec80/phase_annotations \
+  --output outputs/phase_transition_patterns.png
+```
+
 ## Training
 
 Train a CNN backbone:

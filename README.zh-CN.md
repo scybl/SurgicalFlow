@@ -114,6 +114,14 @@ data/cholec80/
 
 如果使用 CAMMA TF-Cholec80 准备脚本，可将处理后的数据放在 `data/cholec80` 下，或通过 `--data_root` 指定自定义路径。
 
+检查阶段转移模式：
+
+```bash
+python checkdata.py \
+  --phase_dir data/cholec80/phase_annotations \
+  --output outputs/phase_transition_patterns.png
+```
+
 ## 训练
 
 训练 CNN 主干模型：

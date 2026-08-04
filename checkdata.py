@@ -1,3 +1,4 @@
+import argparse
 import os
 from collections import defaultdict
 import matplotlib.pyplot as plt
@@ -42,6 +43,8 @@ def compress_sequence(phases):
     去除连续重复：
     [0,0,0,1,1,2,2] -> [0,1,2]
     """
+    if not phases:
+        return tuple()
 
     compressed = [phases[0]]
 
@@ -75,11 +78,27 @@ def analyze_each_video(phase_dir):
     return video2pattern, pattern2videos
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Analyse Cholec80 phase-transition patterns."
+    )
+    parser.add_argument(
+        "--phase_dir",
+        default="data/cholec80/phase_annotations",
+        help="Directory containing Cholec80 *-phase.txt files.",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Optional path for saving the distribution plot instead of showing it.",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
 
-    phase_annotation_dir = "data/cholec80/phase_annotations"   # 改成你的路径
-
-    video2pattern, pattern2videos = analyze_each_video(phase_annotation_dir)
+    args = parse_args()
+    video2pattern, pattern2videos = analyze_each_video(args.phase_dir)
 
     print("\n========== Per-video Phase Pattern ==========")
 
@@ -133,4 +152,9 @@ if __name__ == "__main__":
         )
 
     plt.tight_layout()
-    plt.show()
+
+    if args.output:
+        plt.savefig(args.output, dpi=300)
+        print(f"\nSaved plot to {args.output}")
+    else:
+        plt.show()
