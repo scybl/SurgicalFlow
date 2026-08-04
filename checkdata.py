@@ -1,7 +1,6 @@
 import argparse
 import os
 from collections import defaultdict
-import matplotlib.pyplot as plt
 
 PHASE2ID = {
     "Preparation": 0,
@@ -95,36 +94,24 @@ def parse_args():
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-
-    args = parse_args()
-    video2pattern, pattern2videos = analyze_each_video(args.phase_dir)
-
-    print("\n========== Per-video Phase Pattern ==========")
-
-    for v, p in video2pattern.items():
-        print(v, "->", p)
-
-    print("\n========== Pattern Groups ==========")
-
-    for p, vids in pattern2videos.items():
-        print(p, ":", len(vids), "videos")
-        print("   ", vids)
-        
+def plot_pattern_distribution(pattern2videos, output=None):
     patterns = []
     counts = []
 
-    for p, vids in pattern2videos.items():
-        patterns.append(str(p))
-        counts.append(len(vids))
+    for pattern, videos in pattern2videos.items():
+        patterns.append(str(pattern))
+        counts.append(len(videos))
 
-    # 按数量排序（从大到小）
+    if not patterns:
+        print("\nNo valid phase patterns found; skipping plot.")
+        return False
+
     pairs = sorted(zip(patterns, counts), key=lambda x: x[1], reverse=True)
     patterns, counts = zip(*pairs)
 
-    # ---------------- plot ----------------
+    import matplotlib.pyplot as plt
 
-    plt.figure(figsize=(10, 5))   # 6 类用这个比例最合适
+    plt.figure(figsize=(10, 5))
 
     bars = plt.bar(range(len(counts)), counts)
 
@@ -139,7 +126,6 @@ if __name__ == "__main__":
     plt.ylabel("Number of Videos")
     plt.title("Distribution of Phase Transition Patterns (Cholec80)")
 
-    # 数值标注
     for bar in bars:
         h = bar.get_height()
         plt.text(
@@ -153,8 +139,32 @@ if __name__ == "__main__":
 
     plt.tight_layout()
 
-    if args.output:
-        plt.savefig(args.output, dpi=300)
-        print(f"\nSaved plot to {args.output}")
+    if output:
+        plt.savefig(output, dpi=300)
+        print(f"\nSaved plot to {output}")
     else:
         plt.show()
+
+    return True
+
+
+def main():
+    args = parse_args()
+    video2pattern, pattern2videos = analyze_each_video(args.phase_dir)
+
+    print("\n========== Per-video Phase Pattern ==========")
+
+    for v, p in video2pattern.items():
+        print(v, "->", p)
+
+    print("\n========== Pattern Groups ==========")
+
+    for p, vids in pattern2videos.items():
+        print(p, ":", len(vids), "videos")
+        print("   ", vids)
+
+    plot_pattern_distribution(pattern2videos, args.output)
+
+
+if __name__ == "__main__":
+    main()

@@ -18,6 +18,16 @@ The workflow covers three connected objectives:
 - Experiment artifacts saved as configs, logs, checkpoints, curves, JSON metrics, and optional visualization data.
 - Reproducible command-line entry points for training, testing, and comparison.
 
+## Quick Start Index
+
+| Need | Command |
+| --- | --- |
+| Code structure check | `bash scripts/check_project.sh` |
+| Reuse shared conda env | `conda run -n codex_python bash scripts/check_project.sh` |
+| Run lightweight tests | `conda run -n codex_python pytest tests/ -q` |
+| Inspect phase patterns | `python checkdata.py --phase_dir data/cholec80/phase_annotations --output outputs/phase_transition_patterns.png` |
+| Train a backbone | `python train_backbone.py --name backbone_cnn --epochs 25 --model cnn` |
+
 ## Method Overview
 
 The backbone receives a sliding temporal window of sampled video frames. A CNN extracts per-frame visual features. The CNN baseline averages those features across time, while the CNN-LSTM model uses the final LSTM state as the temporal representation. The shared representation is optimized for phase classification and current-phase remaining-time regression.

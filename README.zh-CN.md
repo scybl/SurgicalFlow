@@ -18,6 +18,16 @@
 - 训练与测试产物包含配置、日志、检查点、曲线图、JSON 指标和可选的可视化数据。
 - 所有训练、测试和对比流程均通过命令行入口运行。
 
+## 快速上手索引
+
+| 目标 | 命令 |
+| --- | --- |
+| 代码结构检查 | `bash scripts/check_project.sh` |
+| 复用共享 conda 环境 | `conda run -n codex_python bash scripts/check_project.sh` |
+| 运行轻量测试 | `conda run -n codex_python pytest tests/ -q` |
+| 检查阶段转移模式 | `python checkdata.py --phase_dir data/cholec80/phase_annotations --output outputs/phase_transition_patterns.png` |
+| 训练 backbone | `python train_backbone.py --name backbone_cnn --epochs 25 --model cnn` |
+
 ## 方法概述
 
 主干模型接收由滑动窗口采样得到的视频帧序列。CNN 负责提取每帧视觉特征。CNN 基线对时间维度进行平均聚合，CNN-LSTM 模型则使用最后一个 LSTM 状态作为时序表示。共享表示同时用于阶段分类和当前阶段剩余时间回归。
