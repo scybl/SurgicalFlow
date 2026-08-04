@@ -54,6 +54,20 @@ The output heads use the predicted phase and remaining-time context to estimate 
 
 Python 3.10 is recommended.
 
+One-command setup:
+
+```bash
+bash scripts/setup_env.sh
+```
+
+Quick code-structure check:
+
+```bash
+bash scripts/check_project.sh
+```
+
+Manual setup:
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -251,3 +265,11 @@ An example comparison figure is included at `picture/compare.jpg`.
 | `--save_dir` | backbone train/test, comparison | `checkpoints` | Artifact root |
 | `--device` | all training/testing scripts | `cuda` | Requested device |
 | `--seed` | all training/testing scripts | `42` | Random seed |
+
+## Result Snapshot
+
+| Experiment | Metric focus | Included evidence |
+| --- | --- | --- |
+| CNN baseline | Current phase accuracy and remaining-time MAE | training and test scripts |
+| CNN-LSTM temporal model | Stability across 16/32-frame windows | `picture/compare.jpg` |
+| Structured output heads | Future timeline and tool-presence prediction | head training/evaluation scripts |
