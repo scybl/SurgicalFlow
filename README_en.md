@@ -10,6 +10,18 @@ The workflow covers three connected objectives:
 - Remaining time regression for the current phase.
 - Downstream timeline and tool-presence prediction from phase/time context.
 
+## Resume Highlights
+
+- Implements CNN and CNN-LSTM temporal models in PyTorch for surgical phase recognition and current-phase remaining-time regression.
+- Separates the visual backbone from timeline/tool output heads, with commands for training, testing, window comparison, and phase-transition analysis.
+- Provides structure checks and lightweight tests for stable GitHub presentation when the Cholec80 dataset is unavailable.
+
+## Reproducibility Boundaries
+
+- Cholec80 data is not distributed in this repository; full training and evaluation require local dataset preparation.
+- `scripts/check_project.sh` and `pytest tests/ -q` do not require private data and are the recommended quick health checks.
+- `picture/` keeps the training pipeline and comparison figures so the method remains inspectable without the dataset.
+
 ## Highlights
 
 - Cholec80 frame, phase, and tool annotation loaders with a fixed train/val/test split of 40/10/30 videos.
