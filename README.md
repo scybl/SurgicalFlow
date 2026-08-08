@@ -4,6 +4,17 @@
 
 SurgicalFlow 实现了一个基于 PyTorch 的时序手术流程预测流程，面向 Cholec80 格式的腹腔镜胆囊切除术数据。代码比较了基于帧特征聚合的 CNN 基线与 CNN-LSTM 时序模型，并评估输入时间窗口长度对流程预测稳定性的影响。
 
+![SurgicalFlow 时序建模预览](docs/images/surgical-flow-preview.svg)
+
+## 成果速览
+
+| 展示项 | 当前结果 | 说明 |
+| --- | --- | --- |
+| 任务覆盖 | 阶段分类 / 剩余时间回归 / 未来时间线 / 器械识别 | 面向 Cholec80 格式数据的多任务流程 |
+| 模型对比 | CNN baseline vs CNN-LSTM | 对比短窗口与时序上下文对剩余时间预测的影响 |
+| 可视化产物 | `picture/train_pipeline.png`, `picture/compare.jpg` | README 中可直接查看方法流程和示例对比 |
+| 轻量验证 | `bash scripts/check_project.sh`, `pytest tests/ -q` | 无私有数据时仍可验证代码结构和入口 |
+
 整体流程覆盖三个相互关联的目标：
 
 - 当前手术阶段分类。

@@ -4,6 +4,17 @@
 
 SurgicalFlow implements a PyTorch pipeline for temporal surgical workflow prediction on Cholec80-style laparoscopic cholecystectomy data. It compares a frame-aggregated CNN baseline with CNN-LSTM temporal models and evaluates how input window length affects workflow prediction stability.
 
+![SurgicalFlow temporal modelling preview](docs/images/surgical-flow-preview.svg)
+
+## Result Showcase
+
+| Showcase item | Current result | Notes |
+| --- | --- | --- |
+| Task coverage | Phase classification / remaining-time regression / future timeline / tool recognition | Multi-task workflow for Cholec80-style data |
+| Model comparison | CNN baseline vs CNN-LSTM | Compares short-window features with temporal context |
+| Visual artifacts | `picture/train_pipeline.png`, `picture/compare.jpg` | Method flow and example comparison are visible in the README |
+| Lightweight verification | `bash scripts/check_project.sh`, `pytest tests/ -q` | Structure can be checked without private dataset files |
+
 The workflow covers three connected objectives:
 
 - Current surgical phase classification.
