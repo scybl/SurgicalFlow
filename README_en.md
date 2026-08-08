@@ -4,7 +4,7 @@
 
 SurgicalFlow is a PyTorch surgical workflow prediction project for laparoscopic cholecystectomy videos. It turns frame sequences, phase annotations, and tool annotations into trainable data pipelines for phase recognition, remaining-time regression, future phase-boundary prediction, and surgical tool recognition.
 
-The default layout targets Cholec80-style data. Cholec80 contains 80 laparoscopic cholecystectomy videos from 13 surgeons; a common prepared layout stores per-video frame sequences with 7 surgical phase labels and 7 surgical tool-presence labels. The labels are not flat in practice: phases follow a surgical workflow order, phase durations are imbalanced, and tool labels are multi-label binary targets affected by tool visibility. SurgicalFlow therefore uses sequence windows, phase-group constraints, class balancing, and timeline weighting by default.
+The default layout targets Cholec80 data. Cholec80 contains 80 laparoscopic cholecystectomy videos from 13 surgeons; a common prepared layout stores per-video frame sequences with 7 surgical phase labels and 7 surgical tool-presence labels. The labels are not flat in practice: phases follow a surgical workflow order, phase durations are imbalanced, and tool labels are multi-label binary targets affected by tool visibility. SurgicalFlow therefore uses sequence windows, phase-group constraints, class balancing, and timeline weighting by default.
 
 Raw videos are not distributed with this repository; lightweight checks and result summaries run without the dataset.
 
