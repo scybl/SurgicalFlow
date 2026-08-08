@@ -23,6 +23,7 @@ PYTHONPYCACHEPREFIX="$PYCACHE_DIR" "$PYTHON_BIN" -m py_compile \
   test_taskA_out_head.py \
   test_taskB_out_head.py \
   general_compare_diagram.py \
+  scripts/generate_project_summary.py \
   checkdata.py
 
 echo "Code structure check passed."

@@ -1,0 +1,49 @@
+{
+  "project": "SurgicalFlow",
+  "phase_classes": 7,
+  "tool_labels": 7,
+  "default_sequence_length": 16,
+  "default_stride": 8,
+  "training_entrypoints": [
+    "train_backbone.py",
+    "train_taskA_out_head.py",
+    "train_taskB_out_head.py"
+  ],
+  "evaluation_entrypoints": [
+    "test_backbone.py",
+    "test_taskA_out_head.py",
+    "test_taskB_out_head.py",
+    "general_compare_diagram.py",
+    "checkdata.py"
+  ],
+  "models": [
+    {
+      "name": "TaskA_CNN",
+      "task": "phase classification + remaining-time regression",
+      "input_shape": "[batch, seq, 3, height, width]",
+      "output": "phase logits, remaining-time ratio",
+      "parameters": 423433
+    },
+    {
+      "name": "TaskA_CNN_LSTM",
+      "task": "temporal phase classification + remaining-time regression",
+      "input_shape": "[batch, seq, 3, height, width]",
+      "output": "phase logits, remaining-time ratio",
+      "parameters": 949769
+    },
+    {
+      "name": "FutureTimelineModel",
+      "task": "future phase boundary regression",
+      "input_shape": "[current phase, ratio, stage order, phase durations]",
+      "output": "7 cumulative future timestamps",
+      "parameters": 19591
+    },
+    {
+      "name": "ToolPredictionModel",
+      "task": "multi-label tool presence prediction",
+      "input_shape": "[current phase, remaining time]",
+      "output": "7 tool logits",
+      "parameters": 17799
+    }
+  ]
+}

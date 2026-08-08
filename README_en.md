@@ -2,25 +2,47 @@
 
 [中文](README.md)
 
-SurgicalFlow is a PyTorch surgical workflow prediction project for Cholec80-style laparoscopic cholecystectomy data. It includes CNN, CNN-LSTM, timeline prediction heads, and tool-recognition heads.
+SurgicalFlow is a PyTorch surgical workflow prediction project for laparoscopic cholecystectomy videos. It turns frame sequences, phase annotations, and tool annotations into trainable data pipelines for phase recognition, remaining-time regression, future phase-boundary prediction, and surgical tool recognition.
 
-![SurgicalFlow temporal modelling preview](docs/images/surgical-flow-preview.svg)
+The default layout is compatible with Cholec80-style data. Raw videos are not distributed with this repository; lightweight checks and result summaries run without the dataset.
 
 ## Features
 
-- Reads surgical frames, phase annotations, and tool annotations.
-- Trains CNN or CNN-LSTM backbone models.
-- Predicts current phase, current-phase remaining time, future phase timeline, and tool usage.
-- Outputs logs, curves, checkpoints, and JSON metrics.
+| Module | Capability |
+| --- | --- |
+| Data loading | Reads frames, phase labels, tool labels, and builds sliding-window sequence samples |
+| Backbones | Uses CNN or CNN-LSTM models for current-phase prediction and remaining-time regression |
+| Timeline prediction | Predicts future phase boundaries from current phase, remaining ratio, and phase priors |
+| Tool recognition | Uses a multi-label output head for surgical tool presence |
+| Reproducible checks | Generates model summaries, structure-check output, and README-visible artifacts |
 
 ## Results
 
-| Item | Content |
-| --- | --- |
-| Tasks | phase classification, remaining-time regression, timeline prediction, tool recognition |
-| Models | CNN baseline, CNN-LSTM |
-| Method figure | `picture/train_pipeline.png` |
-| Comparison figure | `picture/compare.jpg` |
+| Item | Result |
+| --- | ---: |
+| Phase classes | 7 |
+| Tool labels | 7 |
+| Default sequence length | 16 frames |
+| Default stride | 8 frames |
+| `TaskA_CNN` parameters | 423,433 |
+| `TaskA_CNN_LSTM` parameters | 949,769 |
+| `FutureTimelineModel` parameters | 19,591 |
+| `ToolPredictionModel` parameters | 17,799 |
+
+Result files:
+
+- `docs/results/project_summary.md`
+- `docs/results/model_summary.csv`
+- `docs/results/project_summary.json`
+- `docs/results/structure_check.txt`
+
+Model summary sample:
+
+```csv
+model,task,input_shape,output,parameters
+TaskA_CNN,phase classification + remaining-time regression,"[batch, seq, 3, height, width]","phase logits, remaining-time ratio",423433
+TaskA_CNN_LSTM,temporal phase classification + remaining-time regression,"[batch, seq, 3, height, width]","phase logits, remaining-time ratio",949769
+```
 
 ![Training pipeline](picture/train_pipeline.png)
 
@@ -28,9 +50,10 @@ SurgicalFlow is a PyTorch surgical workflow prediction project for Cholec80-styl
 
 ## Quick Start
 
-Check the project structure:
+Set up the environment and run the lightweight structure check:
 
 ```bash
+bash scripts/setup_env.sh
 bash scripts/check_project.sh
 ```
 
@@ -40,10 +63,18 @@ Reuse an existing conda environment:
 conda run -n codex_python bash scripts/check_project.sh
 ```
 
+Generate the README result files:
+
+```bash
+make results
+```
+
 Training example:
 
 ```bash
 python train_backbone.py --name backbone_cnn --epochs 25 --model cnn --data_root data/cholec80
+python train_taskA_out_head.py --name timeline_head --epochs 20 --data_root data/cholec80
+python train_taskB_out_head.py --name tool_head --epochs 20 --data_root data/cholec80
 ```
 
 ## Requirements
@@ -57,6 +88,7 @@ python train_backbone.py --name backbone_cnn --epochs 25 --model cnn --data_root
 - The Cholec80 dataset is not included in this repository.
 - The default data path is `data/cholec80`.
 - Full training and evaluation require local `frames/`, `phase_annotations/`, and `tool_annotations/` directories.
+- `picture/compare.jpg` is a recorded experiment figure; with local data and checkpoints, regenerate it through `general_compare_diagram.py`.
 
 ## Project Layout
 
@@ -66,14 +98,16 @@ model_out_head.py          Timeline and tool output heads
 taskA_data_loader.py       Phase/time data loader
 taskB_data_loader.py       Phase/time/tool data loader
 train_*.py                 Training scripts
-test_*.py                  Evaluation scripts
+test_*.py                  Model evaluation scripts
 picture/                   Method and result figures
+docs/results/              Reproducible result summaries
 tests/                     Lightweight tests
-scripts/                   Check scripts
+scripts/                   Setup, check, and result-generation scripts
 ```
 
 ## Tests
 
 ```bash
 pytest tests/ -q
+make test
 ```

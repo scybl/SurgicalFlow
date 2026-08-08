@@ -1,5 +1,4 @@
 from pathlib import Path
-import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,9 +20,17 @@ def test_readme_has_showcase_sections_and_english_companion():
     assert "## Data Notes" in english
 
 
-def test_method_visual_assets_exist():
-    preview = ROOT / "docs" / "images" / "surgical-flow-preview.svg"
-    assert preview.is_file()
-    ET.parse(preview)
+def test_readme_uses_reproducible_results_and_real_assets():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    english = (ROOT / "README_en.md").read_text(encoding="utf-8")
+    decorative_preview = f"docs/images/{'surgical-flow'}-preview.svg"
+
+    assert decorative_preview not in readme
+    assert decorative_preview not in english
+    assert "docs/results/model_summary.csv" in readme
+    assert "docs/results/model_summary.csv" in english
+
     assert (ROOT / "picture" / "train_pipeline.png").is_file()
     assert (ROOT / "picture" / "compare.jpg").is_file()
+    assert (ROOT / "docs" / "results" / "project_summary.md").is_file()
+    assert (ROOT / "docs" / "results" / "model_summary.csv").is_file()

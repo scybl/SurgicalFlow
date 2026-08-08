@@ -2,25 +2,47 @@
 
 [English](README_en.md)
 
-SurgicalFlow 是一个基于 PyTorch 的手术流程预测项目，面向 Cholec80 格式的腹腔镜胆囊切除术数据。项目包含 CNN、CNN-LSTM、时间线预测头和器械识别头。
+SurgicalFlow 是一个基于 PyTorch 的手术流程预测项目，面向腹腔镜胆囊切除术视频数据。项目将手术帧序列、阶段标注和器械标注组织成可训练的数据管线，用于阶段识别、剩余时间回归、未来阶段时间线预测和器械使用识别。
 
-![SurgicalFlow 时序建模预览](docs/images/surgical-flow-preview.svg)
+项目默认兼容 Cholec80 风格目录结构；仓库不分发原始视频数据，轻量检查和结果摘要可以在无数据环境下运行。
 
 ## 功能说明
 
-- 读取手术帧、阶段标注和器械标注。
-- 训练 CNN 或 CNN-LSTM 主干模型。
-- 预测当前阶段、当前阶段剩余时间、未来阶段时间线和器械使用情况。
-- 输出训练日志、曲线图、检查点和 JSON 指标。
+| 模块 | 功能 |
+| --- | --- |
+| 数据读取 | 读取手术帧、阶段标注、器械标注，并生成滑动窗口序列样本 |
+| 主干模型 | 使用 CNN 或 CNN-LSTM 预测当前阶段和当前阶段剩余时间 |
+| 时间线预测 | 根据当前阶段、剩余比例和阶段先验预测未来阶段边界 |
+| 器械识别 | 使用多标签输出头预测手术器械存在情况 |
+| 可复现检查 | 生成模型摘要、结构检查结果和 README 可见输出 |
 
 ## 结果展示
 
-| 项目 | 内容 |
-| --- | --- |
-| 任务 | 阶段分类、剩余时间回归、时间线预测、器械识别 |
-| 模型 | CNN baseline、CNN-LSTM |
-| 方法图 | `picture/train_pipeline.png` |
-| 对比图 | `picture/compare.jpg` |
+| 项目 | 结果 |
+| --- | ---: |
+| 阶段类别 | 7 |
+| 器械标签 | 7 |
+| 默认序列长度 | 16 frames |
+| 默认步长 | 8 frames |
+| `TaskA_CNN` 参数量 | 423,433 |
+| `TaskA_CNN_LSTM` 参数量 | 949,769 |
+| `FutureTimelineModel` 参数量 | 19,591 |
+| `ToolPredictionModel` 参数量 | 17,799 |
+
+结果文件：
+
+- `docs/results/project_summary.md`
+- `docs/results/model_summary.csv`
+- `docs/results/project_summary.json`
+- `docs/results/structure_check.txt`
+
+模型摘要示例：
+
+```csv
+model,task,input_shape,output,parameters
+TaskA_CNN,phase classification + remaining-time regression,"[batch, seq, 3, height, width]","phase logits, remaining-time ratio",423433
+TaskA_CNN_LSTM,temporal phase classification + remaining-time regression,"[batch, seq, 3, height, width]","phase logits, remaining-time ratio",949769
+```
 
 ![训练流程](picture/train_pipeline.png)
 
@@ -28,9 +50,10 @@ SurgicalFlow 是一个基于 PyTorch 的手术流程预测项目，面向 Cholec
 
 ## 快速上手
 
-检查项目结构：
+配置环境并运行轻量检查：
 
 ```bash
+bash scripts/setup_env.sh
 bash scripts/check_project.sh
 ```
 
@@ -40,10 +63,18 @@ bash scripts/check_project.sh
 conda run -n codex_python bash scripts/check_project.sh
 ```
 
+生成 README 对应结果文件：
+
+```bash
+make results
+```
+
 训练示例：
 
 ```bash
 python train_backbone.py --name backbone_cnn --epochs 25 --model cnn --data_root data/cholec80
+python train_taskA_out_head.py --name timeline_head --epochs 20 --data_root data/cholec80
+python train_taskB_out_head.py --name tool_head --epochs 20 --data_root data/cholec80
 ```
 
 ## 环境要求
@@ -57,6 +88,7 @@ python train_backbone.py --name backbone_cnn --epochs 25 --model cnn --data_root
 - 仓库不包含 Cholec80 数据集。
 - 默认数据路径为 `data/cholec80`。
 - 完整训练和评估需要本地准备 `frames/`、`phase_annotations/` 和 `tool_annotations/`。
+- `picture/compare.jpg` 是已有实验记录图；提供本地数据和检查点后，可通过 `general_compare_diagram.py` 重新生成对比图。
 
 ## 目录结构
 
@@ -66,14 +98,16 @@ model_out_head.py          时间线和器械输出头
 taskA_data_loader.py       阶段/时间数据读取
 taskB_data_loader.py       阶段/时间/器械数据读取
 train_*.py                 训练脚本
-test_*.py                  评估脚本
+test_*.py                  模型评估脚本
 picture/                   方法图和示例结果图
+docs/results/              可复现结果摘要
 tests/                     轻量测试
-scripts/                   检查脚本
+scripts/                   环境配置、检查和结果生成脚本
 ```
 
 ## 测试
 
 ```bash
 pytest tests/ -q
+make test
 ```

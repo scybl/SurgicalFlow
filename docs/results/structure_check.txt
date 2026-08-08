@@ -1,0 +1,2 @@
+Code structure check passed.
+Dataset not found at data/cholec80. Follow README.md to link or pass --data_root.

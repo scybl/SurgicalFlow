@@ -1,0 +1,5 @@
+model,task,input_shape,output,parameters
+TaskA_CNN,phase classification + remaining-time regression,"[batch, seq, 3, height, width]","phase logits, remaining-time ratio",423433
+TaskA_CNN_LSTM,temporal phase classification + remaining-time regression,"[batch, seq, 3, height, width]","phase logits, remaining-time ratio",949769
+FutureTimelineModel,future phase boundary regression,"[current phase, ratio, stage order, phase durations]",7 cumulative future timestamps,19591
+ToolPredictionModel,multi-label tool presence prediction,"[current phase, remaining time]",7 tool logits,17799
