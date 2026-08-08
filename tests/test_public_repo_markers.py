@@ -35,11 +35,16 @@ SKIPPED_DIRS = {
     "build",
     "dist",
 }
+SKIPPED_FILES = {
+    ".DS_Store",
+}
 
 
 def iter_project_text_files():
     for path in ROOT.rglob("*"):
         if any(part in SKIPPED_DIRS for part in path.parts):
+            continue
+        if path.name in SKIPPED_FILES:
             continue
         if path.is_file() and path.suffix.lower() in TEXT_SUFFIXES:
             yield path
