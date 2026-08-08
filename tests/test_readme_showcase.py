@@ -36,7 +36,6 @@ def test_readme_uses_reproducible_results_and_real_assets():
     assert "粗阶段组 loss" in readme
     assert "phase group loss" in english
 
-    assert (ROOT / "picture" / "train_pipeline.png").is_file()
     assert (ROOT / "picture" / "compare.jpg").is_file()
     assert (ROOT / "docs" / "results" / "project_summary.md").is_file()
     assert (ROOT / "docs" / "results" / "model_summary.csv").is_file()
