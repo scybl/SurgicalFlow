@@ -6,7 +6,7 @@ SurgicalFlow implements a PyTorch pipeline for temporal surgical workflow predic
 
 ![SurgicalFlow temporal modelling preview](docs/images/surgical-flow-preview.svg)
 
-## Result Showcase
+## Results
 
 | Showcase item | Current result | Notes |
 | --- | --- | --- |
@@ -21,11 +21,11 @@ The workflow covers three connected objectives:
 - Remaining time regression for the current phase.
 - Downstream timeline and tool-presence prediction from phase/time context.
 
-## Resume Highlights
+## Core Features
 
 - Implements CNN and CNN-LSTM temporal models in PyTorch for surgical phase recognition and current-phase remaining-time regression.
 - Separates the visual backbone from timeline/tool output heads, with commands for training, testing, window comparison, and phase-transition analysis.
-- Provides structure checks and lightweight tests for stable GitHub presentation when the Cholec80 dataset is unavailable.
+- Provides structure checks and lightweight tests so project entry points remain verifiable when the Cholec80 dataset is unavailable.
 
 ## Reproducibility Boundaries
 

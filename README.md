@@ -6,7 +6,7 @@ SurgicalFlow 实现了一个基于 PyTorch 的时序手术流程预测流程，�
 
 ![SurgicalFlow 时序建模预览](docs/images/surgical-flow-preview.svg)
 
-## 成果速览
+## 结果展示
 
 | 展示项 | 当前结果 | 说明 |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ SurgicalFlow 实现了一个基于 PyTorch 的时序手术流程预测流程，�
 - 当前阶段剩余时间回归。
 - 基于阶段与时间上下文的未来阶段时间线预测和器械使用预测。
 
-## 简历亮点
+## 核心功能
 
 - 使用 PyTorch 实现 CNN 与 CNN-LSTM 时序模型，面向手术阶段识别和当前阶段剩余时间回归。
 - 将视觉 backbone 与 timeline/tool 输出头拆分，支持训练、测试、窗口长度对比和阶段转移分析。
