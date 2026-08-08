@@ -12,8 +12,10 @@ The default layout is compatible with Cholec80-style data. Raw videos are not di
 | --- | --- |
 | Data loading | Reads frames, phase labels, tool labels, and builds sliding-window sequence samples |
 | Backbones | Uses CNN or CNN-LSTM models for current-phase prediction and remaining-time regression |
+| Hierarchical optimization | Uses phase class balancing, coarse phase-group loss, and ordinal phase-distance loss |
 | Timeline prediction | Predicts future phase boundaries from current phase, remaining ratio, and phase priors |
-| Tool recognition | Uses a multi-label output head for surgical tool presence |
+| Timeline weighting | Gives higher training weight to the current and near-future phase boundaries |
+| Tool recognition | Uses a multi-label output head for surgical tool presence with positive-class weighting |
 | Reproducible checks | Generates model summaries, structure-check output, and README-visible artifacts |
 
 ## Results
@@ -21,9 +23,11 @@ The default layout is compatible with Cholec80-style data. Raw videos are not di
 | Item | Result |
 | --- | ---: |
 | Phase classes | 7 |
+| Coarse phase groups | 4 |
 | Tool labels | 7 |
 | Default sequence length | 16 frames |
 | Default stride | 8 frames |
+| Default optimization | phase class balance, phase group loss, phase order loss, timeline horizon weighting, tool positive-class weighting |
 | `TaskA_CNN` parameters | 423,433 |
 | `TaskA_CNN_LSTM` parameters | 949,769 |
 | `FutureTimelineModel` parameters | 19,591 |
@@ -77,6 +81,14 @@ python train_taskA_out_head.py --name timeline_head --epochs 20 --data_root data
 python train_taskB_out_head.py --name tool_head --epochs 20 --data_root data/cholec80
 ```
 
+Workflow-aware weighting is enabled by default. To fall back to flat objectives:
+
+```bash
+python train_backbone.py --name flat_cnn --epochs 25 --model cnn --data_root data/cholec80 --disable_class_balance --phase_group_loss_weight 0 --phase_order_loss_weight 0
+python train_taskA_out_head.py --name flat_timeline --epochs 20 --data_root data/cholec80 --timeline_loss_weighting uniform
+python train_taskB_out_head.py --name flat_tool --epochs 20 --data_root data/cholec80 --disable_tool_class_balance
+```
+
 ## Requirements
 
 - Python 3.10+
@@ -97,6 +109,8 @@ python train_taskB_out_head.py --name tool_head --epochs 20 --data_root data/cho
 ```text
 model_backbone.py          CNN and CNN-LSTM backbones
 model_out_head.py          Timeline and tool output heads
+workflow_schema.py         Phase, phase-group, and tool label definitions
+workflow_losses.py         Hierarchical loss and weighting utilities
 taskA_data_loader.py       Phase/time data loader
 taskB_data_loader.py       Phase/time/tool data loader
 train_*.py                 Training scripts

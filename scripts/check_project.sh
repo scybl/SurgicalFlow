@@ -23,6 +23,8 @@ PYTHONPYCACHEPREFIX="$PYCACHE_DIR" "$PYTHON_BIN" -m py_compile \
   test_taskA_out_head.py \
   test_taskB_out_head.py \
   general_compare_diagram.py \
+  workflow_schema.py \
+  workflow_losses.py \
   scripts/generate_project_summary.py \
   checkdata.py
 

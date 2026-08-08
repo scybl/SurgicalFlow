@@ -8,10 +8,14 @@ import csv
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import sys
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-NUM_PHASES = 7
-NUM_TOOLS = 7
+from workflow_schema import NUM_PHASES, NUM_TOOLS, PHASE_GROUPS
+
 DEFAULT_SEQ_LEN = 16
 DEFAULT_STRIDE = 8
 
@@ -106,9 +110,17 @@ def project_summary() -> dict[str, object]:
     return {
         "project": "SurgicalFlow",
         "phase_classes": NUM_PHASES,
+        "phase_groups": len(PHASE_GROUPS),
         "tool_labels": NUM_TOOLS,
         "default_sequence_length": DEFAULT_SEQ_LEN,
         "default_stride": DEFAULT_STRIDE,
+        "workflow_aware_training": [
+            "phase class balancing",
+            "coarse phase-group loss",
+            "ordinal phase-distance loss",
+            "timeline horizon weighting",
+            "tool positive-class weighting",
+        ],
         "training_entrypoints": [
             "train_backbone.py",
             "train_taskA_out_head.py",
@@ -151,9 +163,11 @@ def write_markdown(path: Path, summary: dict[str, object], specs: list[ModelSpec
         "| Item | Value |",
         "| --- | --- |",
         f"| Phase classes | {summary['phase_classes']} |",
+        f"| Workflow phase groups | {summary['phase_groups']} |",
         f"| Tool labels | {summary['tool_labels']} |",
         f"| Default sequence length | {summary['default_sequence_length']} frames |",
         f"| Default stride | {summary['default_stride']} frames |",
+        f"| Workflow-aware training | {', '.join(summary['workflow_aware_training'])} |",
         "",
         "## Model Inventory",
         "",

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
+from workflow_schema import NUM_PHASES, NUM_TOOLS
 
 
 class FutureTimelineModel(nn.Module):
@@ -8,19 +9,19 @@ class FutureTimelineModel(nn.Module):
     Pure regression model (NO structural constraints inside forward)
 
     Input:
-        cur_stage_idx : [B]     (1~7)
+        cur_stage_idx : [B]     (1~7 workflow position)
         ratio_input   : [B,1]   (remaining ratio of current stage)
         stage_order   : [B,7]   (0/1 mask)
         all_time      : [B,7]   (total time of each stage)
 
     Output:
-        raw_future    : [B,7]   (unconstrained timeline prediction)
+        raw_future    : [B,num_phases]   (unconstrained timeline prediction)
     """
 
     def __init__(
         self,
         hidden_dim=128,
-        num_phases=7
+        num_phases=NUM_PHASES
     ):
         super().__init__()
 
@@ -87,18 +88,18 @@ class ToolPredictionModel(nn.Module):
     Pure MLP tool prediction model (same design style as FutureTimelineModel)
 
     Input:
-        cur_stage_idx : [B]     (1~7)
+        cur_stage_idx : [B]     (1~7 workflow position)
         phase_remain  : [B,1]   (remaining time or ratio)
 
     Output:
-        tool_logits   : [B,7]   (tool presence logits)
+        tool_logits   : [B,num_tools]   (tool presence logits)
     """
 
     def __init__(
         self,
         hidden_dim=128,
-        num_phases=7,
-        num_tools=7
+        num_phases=NUM_PHASES,
+        num_tools=NUM_TOOLS
     ):
         super().__init__()
 

@@ -27,6 +27,8 @@ def test_generated_project_summary_matches_script_values():
     )
 
     assert actual["phase_classes"] == expected["phase_classes"]
+    assert actual["phase_groups"] == expected["phase_groups"]
     assert actual["tool_labels"] == expected["tool_labels"]
     assert actual["default_sequence_length"] == expected["default_sequence_length"]
     assert actual["default_stride"] == expected["default_stride"]
+    assert actual["workflow_aware_training"] == expected["workflow_aware_training"]

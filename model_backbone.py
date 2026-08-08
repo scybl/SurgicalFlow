@@ -1,9 +1,7 @@
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import torch
-import torch.nn as nn
+from workflow_schema import NUM_PHASES
 
 
 class TaskA_CNN(nn.Module):
@@ -16,11 +14,11 @@ class TaskA_CNN(nn.Module):
         frames: [B, T, 3, H, W]
 
     Output:
-        phase_logits: [B,7]
+        phase_logits: [B,num_phases+1] with class 0 reserved as ignore_index
         phase_remain: [B]
     """
 
-    def __init__(self, num_phases=7, dropout=0.3):
+    def __init__(self, num_phases=NUM_PHASES, dropout=0.3):
         super().__init__()
 
         # ---------------- CNN Backbone ----------------
@@ -64,8 +62,8 @@ class TaskA_CNN(nn.Module):
 
         # ---------------- Heads ----------------
 
-        # phase classification
-        self.phase_head = nn.Linear(128, num_phases+1) # 添加无效类
+        # class 0 is kept as an ignored padding label for CrossEntropyLoss
+        self.phase_head = nn.Linear(128, num_phases + 1)
 
         # phase remaining regression
         self.remain_head = nn.Linear(128, 1)
@@ -88,7 +86,7 @@ class TaskA_CNN(nn.Module):
         shared = self.shared_fc(feat)         # [B,128]
 
         # heads
-        phase_logits = self.phase_head(shared)     # [B,7]
+        phase_logits = self.phase_head(shared)     # [B,num_phases+1]
 
         phase_remain = self.remain_head(shared)    # [B,1]
         phase_remain = F.relu(phase_remain)        # 防负时间
@@ -106,13 +104,13 @@ class TaskA_CNN_LSTM(nn.Module):
         frames: [B, T, 3, H, W]
 
     Output:
-        phase_logits: [B,7]
+        phase_logits: [B,num_phases+1] with class 0 reserved as ignore_index
         phase_remain: [B]
     """
 
     def __init__(
         self,
-        num_phases=7,
+        num_phases=NUM_PHASES,
         lstm_hidden=256,
         lstm_layers=1,
         bidirectional=False,

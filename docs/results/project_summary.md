@@ -3,9 +3,11 @@
 | Item | Value |
 | --- | --- |
 | Phase classes | 7 |
+| Workflow phase groups | 4 |
 | Tool labels | 7 |
 | Default sequence length | 16 frames |
 | Default stride | 8 frames |
+| Workflow-aware training | phase class balancing, coarse phase-group loss, ordinal phase-distance loss, timeline horizon weighting, tool positive-class weighting |
 
 ## Model Inventory
 

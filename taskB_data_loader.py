@@ -4,19 +4,9 @@ from torch.utils.data import Dataset
 import numpy as np
 from PIL import Image
 
+from workflow_schema import NUM_TOOLS, PHASE2ID
+
 FPS_ORI = 25
-
-PHASE2ID = {
-    "Preparation": 1,
-    "CalotTriangleDissection": 2,
-    "ClippingCutting": 3,
-    "GallbladderDissection": 4,
-    "GallbladderPackaging": 5,
-    "CleaningCoagulation": 6,
-    "GallbladderRetraction": 7
-}
-
-NUM_TOOLS = 7
 
 
 class Cholec80DatasetTaskB(Dataset):
@@ -189,6 +179,7 @@ class Cholec80DatasetTaskB(Dataset):
 
                 self.samples.append({
                     "frames": clip_frame_paths,
+                    "phase": cur_phase,
                     "stage_order": stage_order,
                     "time": time_list,
                     "all_time": stage_durations,

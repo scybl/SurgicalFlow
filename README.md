@@ -12,8 +12,10 @@ SurgicalFlow 是一个基于 PyTorch 的手术流程预测项目，面向腹腔�
 | --- | --- |
 | 数据读取 | 读取手术帧、阶段标注、器械标注，并生成滑动窗口序列样本 |
 | 主干模型 | 使用 CNN 或 CNN-LSTM 预测当前阶段和当前阶段剩余时间 |
+| 层级优化 | 使用阶段类别平衡、粗阶段组 loss 和阶段顺序距离惩罚 |
 | 时间线预测 | 根据当前阶段、剩余比例和阶段先验预测未来阶段边界 |
-| 器械识别 | 使用多标签输出头预测手术器械存在情况 |
+| 时间线加权 | 对当前阶段和近未来阶段边界赋予更高训练权重 |
+| 器械识别 | 使用多标签输出头预测手术器械存在情况，并支持正样本权重 |
 | 可复现检查 | 生成模型摘要、结构检查结果和 README 可见输出 |
 
 ## 结果展示
@@ -21,9 +23,11 @@ SurgicalFlow 是一个基于 PyTorch 的手术流程预测项目，面向腹腔�
 | 项目 | 结果 |
 | --- | ---: |
 | 阶段类别 | 7 |
+| 粗阶段组 | 4 |
 | 器械标签 | 7 |
 | 默认序列长度 | 16 frames |
 | 默认步长 | 8 frames |
+| 默认优化策略 | 阶段类别平衡、粗阶段组 loss、阶段顺序距离惩罚、时间线 horizon 加权、器械正样本加权 |
 | `TaskA_CNN` 参数量 | 423,433 |
 | `TaskA_CNN_LSTM` 参数量 | 949,769 |
 | `FutureTimelineModel` 参数量 | 19,591 |
@@ -77,6 +81,14 @@ python train_taskA_out_head.py --name timeline_head --epochs 20 --data_root data
 python train_taskB_out_head.py --name tool_head --epochs 20 --data_root data/cholec80
 ```
 
+默认训练会启用层级权重；如需退回扁平目标，可使用：
+
+```bash
+python train_backbone.py --name flat_cnn --epochs 25 --model cnn --data_root data/cholec80 --disable_class_balance --phase_group_loss_weight 0 --phase_order_loss_weight 0
+python train_taskA_out_head.py --name flat_timeline --epochs 20 --data_root data/cholec80 --timeline_loss_weighting uniform
+python train_taskB_out_head.py --name flat_tool --epochs 20 --data_root data/cholec80 --disable_tool_class_balance
+```
+
 ## 环境要求
 
 - Python 3.10+
@@ -97,6 +109,8 @@ python train_taskB_out_head.py --name tool_head --epochs 20 --data_root data/cho
 ```text
 model_backbone.py          CNN 和 CNN-LSTM 主干
 model_out_head.py          时间线和器械输出头
+workflow_schema.py         阶段、阶段组和器械标签定义
+workflow_losses.py         层级 loss 和权重工具
 taskA_data_loader.py       阶段/时间数据读取
 taskB_data_loader.py       阶段/时间/器械数据读取
 train_*.py                 训练脚本

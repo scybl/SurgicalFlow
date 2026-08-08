@@ -2,15 +2,7 @@ import argparse
 import os
 from collections import defaultdict
 
-PHASE2ID = {
-    "Preparation": 0,
-    "CalotTriangleDissection": 1,
-    "ClippingCutting": 2,
-    "GallbladderDissection": 3,
-    "GallbladderPackaging": 4,
-    "CleaningCoagulation": 5,
-    "GallbladderRetraction": 6
-}
+from workflow_schema import ZERO_BASED_PHASE2ID as PHASE2ID
 
 
 def load_phase_file(path):

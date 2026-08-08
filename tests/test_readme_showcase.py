@@ -29,6 +29,10 @@ def test_readme_uses_reproducible_results_and_real_assets():
     assert decorative_preview not in english
     assert "docs/results/model_summary.csv" in readme
     assert "docs/results/model_summary.csv" in english
+    assert "workflow_losses.py" in readme
+    assert "workflow_losses.py" in english
+    assert "粗阶段组 loss" in readme
+    assert "phase group loss" in english
 
     assert (ROOT / "picture" / "train_pipeline.png").is_file()
     assert (ROOT / "picture" / "compare.jpg").is_file()

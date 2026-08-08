@@ -13,10 +13,8 @@ import matplotlib.pyplot as plt
 
 from taskB_data_loader import Cholec80DatasetTaskB
 from model_out_head import ToolPredictionModel
-
-
-NUM_PHASES = 7
-NUM_TOOLS = 7
+from workflow_schema import NUM_PHASES, NUM_TOOLS
+from workflow_losses import tool_pos_weight_tensor
 
 
 # -------------------------------------------------
@@ -42,6 +40,11 @@ def parse_args():
 
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--disable_tool_class_balance",
+        action="store_true",
+        help="Disable positive-class weights for multi-label tool prediction.",
+    )
 
     return parser.parse_args()
 
@@ -176,7 +179,12 @@ def main():
         lr=args.lr
     )
 
-    criterion = nn.BCEWithLogitsLoss()
+    tool_pos_weight = None
+    if not args.disable_tool_class_balance:
+        tool_pos_weight = tool_pos_weight_tensor(train_dataset.samples, device)
+        logger.info(f"Tool positive weights: {tool_pos_weight.detach().cpu().tolist()}")
+
+    criterion = nn.BCEWithLogitsLoss(pos_weight=tool_pos_weight)
 
     best_val = float("inf")
 

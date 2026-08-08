@@ -10,6 +10,11 @@ import logging
 
 from taskA_data_loader import Cholec80DatasetTaskA
 from model_backbone import TaskA_CNN, TaskA_CNN_LSTM
+from workflow_losses import (
+    phase_class_weight_tensor,
+    phase_group_loss,
+    phase_order_loss,
+)
 
 import numpy as np
 from sklearn.metrics import r2_score
@@ -42,6 +47,15 @@ def parse_args():
 
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--phase_loss_weight", type=float, default=1.0)
+    parser.add_argument("--remain_loss_weight", type=float, default=0.2)
+    parser.add_argument("--phase_group_loss_weight", type=float, default=0.25)
+    parser.add_argument("--phase_order_loss_weight", type=float, default=0.05)
+    parser.add_argument(
+        "--disable_class_balance",
+        action="store_true",
+        help="Disable inverse-frequency phase class weights.",
+    )
 
     return parser.parse_args()
 
@@ -254,10 +268,20 @@ def main():
 
     # ---------------- Loss ----------------
 
-    lambda_phase = 1.0
-    lambda_remain = 0.2
+    lambda_phase = args.phase_loss_weight
+    lambda_remain = args.remain_loss_weight
+    lambda_group = args.phase_group_loss_weight
+    lambda_order = args.phase_order_loss_weight
 
-    criterion_phase = torch.nn.CrossEntropyLoss(ignore_index=0)
+    phase_weight = None
+    if not args.disable_class_balance:
+        phase_weight = phase_class_weight_tensor(train_dataset.samples, device)
+        logger.info(f"Phase class weights: {phase_weight.detach().cpu().tolist()}")
+
+    criterion_phase = torch.nn.CrossEntropyLoss(
+        ignore_index=0,
+        weight=phase_weight,
+    )
     criterion_remain = torch.nn.SmoothL1Loss()
 
     best_mae = float("inf")
@@ -309,10 +333,14 @@ def main():
             # ---------------- loss ----------------
 
             loss_phase = criterion_phase(pred_phase_logits, phase_gt)
+            loss_group = phase_group_loss(pred_phase_logits, phase_gt)
+            loss_order = phase_order_loss(pred_phase_logits, phase_gt)
             loss_remain = criterion_remain(pred_phase_remain, phase_remain_gt)
 
             total_loss = (
                 lambda_phase * loss_phase +
+                lambda_group * loss_group +
+                lambda_order * loss_order +
                 lambda_remain * loss_remain
             )
 
@@ -343,7 +371,8 @@ def main():
             pbar.set_postfix(
                 loss=f"{total_loss.item():.3f}",
                 acc=f"{phase_acc.item():.2f}",
-                mae=f"{mae.item():.3f}"
+                mae=f"{mae.item():.3f}",
+                group=f"{loss_group.item():.3f}",
             )
 
         # ---------------- epoch summary ----------------

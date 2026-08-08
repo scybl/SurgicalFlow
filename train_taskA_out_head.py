@@ -13,9 +13,8 @@ import matplotlib.pyplot as plt
 
 from taskA_data_loader import Cholec80DatasetTaskA
 from model_out_head import FutureTimelineModel
-
-
-NUM_PHASES = 7
+from workflow_schema import NUM_PHASES
+from workflow_losses import weighted_timeline_loss
 
 
 # -------------------------------------------------
@@ -41,6 +40,13 @@ def parse_args():
 
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--timeline_loss_weighting",
+        choices=["uniform", "workflow"],
+        default="workflow",
+    )
+    parser.add_argument("--current_stage_weight", type=float, default=1.5)
+    parser.add_argument("--future_decay", type=float, default=0.85)
 
     return parser.parse_args()
 
@@ -274,7 +280,17 @@ def main():
 
             # ---------------- loss ----------------
 
-            loss = criterion(raw_future, gt_future)
+            if args.timeline_loss_weighting == "workflow":
+                loss = weighted_timeline_loss(
+                    raw_future,
+                    gt_future,
+                    stage_order,
+                    cur_stage_idx,
+                    current_stage_weight=args.current_stage_weight,
+                    future_decay=args.future_decay,
+                )
+            else:
+                loss = criterion(raw_future, gt_future)
 
             optimizer.zero_grad()
             loss.backward()
@@ -327,7 +343,19 @@ def main():
                     all_time
                 )
 
-                val_running += criterion(raw_future, gt_future).item()
+                if args.timeline_loss_weighting == "workflow":
+                    val_loss_batch = weighted_timeline_loss(
+                        raw_future,
+                        gt_future,
+                        stage_order,
+                        cur_stage_idx,
+                        current_stage_weight=args.current_stage_weight,
+                        future_decay=args.future_decay,
+                    )
+                else:
+                    val_loss_batch = criterion(raw_future, gt_future)
+
+                val_running += val_loss_batch.item()
 
         val_loss = val_running / len(val_loader)
         val_curve.append(val_loss)
