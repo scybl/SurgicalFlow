@@ -29,6 +29,8 @@ def test_readme_uses_reproducible_results_and_real_assets():
     assert decorative_preview not in english
     assert "docs/results/model_summary.csv" in readme
     assert "docs/results/model_summary.csv" in english
+    assert "picture/train_pipeline.png" not in readme
+    assert "picture/train_pipeline.png" not in english
     assert "workflow_losses.py" in readme
     assert "workflow_losses.py" in english
     assert "粗阶段组 loss" in readme
@@ -50,3 +52,11 @@ def test_readme_has_cholec80_download_notes():
     assert "cholec80.tar.gz" in english
     assert "data/cholec80/frames/" in readme
     assert "data/cholec80/frames/" in english
+    assert "80 个腹腔镜胆囊切除术视频" in readme
+    assert "80 laparoscopic cholecystectomy videos" in english
+    assert "13 位外科医生" in readme
+    assert "13 surgeons" in english
+    assert "## 参考资料" in readme
+    assert "## References" in english
+    assert "10.1109/TMI.2016.2593957" in readme
+    assert "10.1109/TMI.2016.2593957" in english

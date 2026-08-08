@@ -4,7 +4,9 @@
 
 SurgicalFlow is a PyTorch surgical workflow prediction project for laparoscopic cholecystectomy videos. It turns frame sequences, phase annotations, and tool annotations into trainable data pipelines for phase recognition, remaining-time regression, future phase-boundary prediction, and surgical tool recognition.
 
-The default layout is compatible with Cholec80-style data. Raw videos are not distributed with this repository; lightweight checks and result summaries run without the dataset.
+The default layout targets Cholec80-style data. Cholec80 contains 80 laparoscopic cholecystectomy videos from 13 surgeons; a common prepared layout stores per-video frame sequences with 7 surgical phase labels and 7 surgical tool-presence labels. The labels are not flat in practice: phases follow a surgical workflow order, phase durations are imbalanced, and tool labels are multi-label binary targets affected by tool visibility. SurgicalFlow therefore uses sequence windows, phase-group constraints, class balancing, and timeline weighting by default.
+
+Raw videos are not distributed with this repository; lightweight checks and result summaries run without the dataset.
 
 ## Features
 
@@ -47,8 +49,6 @@ model,task,input_shape,output,parameters
 TaskA_CNN,phase classification + remaining-time regression,"[batch, seq, 3, height, width]","phase logits, remaining-time ratio",423433
 TaskA_CNN_LSTM,temporal phase classification + remaining-time regression,"[batch, seq, 3, height, width]","phase logits, remaining-time ratio",949769
 ```
-
-![Training pipeline](picture/train_pipeline.png)
 
 ![Remaining-time comparison](picture/compare.jpg)
 
@@ -102,7 +102,14 @@ python train_taskB_out_head.py --name flat_tool --epochs 20 --data_root data/cho
 - The default data path is `data/cholec80`.
 - The official notes recommend around 166 GB of free space before download; the extracted dataset is about 85.2 GB.
 - Full training and evaluation require `data/cholec80/frames/`, `data/cholec80/phase_annotations/`, and `data/cholec80/tool_annotations/`.
+- Phase labels include Preparation, CalotTriangleDissection, ClippingCutting, GallbladderDissection, GallbladderPackaging, CleaningCoagulation, and GallbladderRetraction.
+- Tool labels include Grasper, Bipolar, Hook, Scissors, Clipper, Irrigator, and SpecimenBag.
 - `picture/compare.jpg` is a recorded experiment figure; with local data and checkpoints, regenerate it through `general_compare_diagram.py`.
+
+## References
+
+- [CAMMA-public/TF-Cholec80](https://github.com/CAMMA-public/TF-Cholec80): official Cholec80 data-preparation entry point and TensorFlow data wrapper.
+- [Twinanda et al., EndoNet: A Deep Architecture for Recognition Tasks on Laparoscopic Videos](https://doi.org/10.1109/TMI.2016.2593957): Cholec80-related paper; see also the [arXiv version](https://arxiv.org/abs/1602.03012).
 
 ## Project Layout
 

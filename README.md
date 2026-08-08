@@ -4,7 +4,9 @@
 
 SurgicalFlow 是一个基于 PyTorch 的手术流程预测项目，面向腹腔镜胆囊切除术视频数据。项目将手术帧序列、阶段标注和器械标注组织成可训练的数据管线，用于阶段识别、剩余时间回归、未来阶段时间线预测和器械使用识别。
 
-项目默认兼容 Cholec80 风格目录结构；仓库不分发原始视频数据，轻量检查和结果摘要可以在无数据环境下运行。
+项目默认使用 Cholec80 风格数据。Cholec80 包含 80 个腹腔镜胆囊切除术视频，来自 13 位外科医生；常用整理形式为按视频拆分的帧序列，并配套 7 个手术阶段标签和 7 类器械存在标签。它的标签不是简单的扁平分类：手术阶段具有明确的流程顺序，不同阶段时长差异明显，器械标签是多标签二分类且受画面可见性影响。因此本项目默认使用序列窗口、阶段组约束、类别平衡和时间线加权来建模这些数据特点。
+
+仓库不分发原始视频数据；轻量检查和结果摘要可以在无数据环境下运行。
 
 ## 功能说明
 
@@ -47,8 +49,6 @@ model,task,input_shape,output,parameters
 TaskA_CNN,phase classification + remaining-time regression,"[batch, seq, 3, height, width]","phase logits, remaining-time ratio",423433
 TaskA_CNN_LSTM,temporal phase classification + remaining-time regression,"[batch, seq, 3, height, width]","phase logits, remaining-time ratio",949769
 ```
-
-![训练流程](picture/train_pipeline.png)
 
 ![剩余时间对比](picture/compare.jpg)
 
@@ -102,7 +102,14 @@ python train_taskB_out_head.py --name flat_tool --epochs 20 --data_root data/cho
 - 默认数据路径为 `data/cholec80`。
 - 官方说明中数据下载约需 166 GB 可用空间，解压后约 85.2 GB。
 - 完整训练和评估需要整理为 `data/cholec80/frames/`、`data/cholec80/phase_annotations/` 和 `data/cholec80/tool_annotations/`。
+- 阶段标签包括 Preparation、CalotTriangleDissection、ClippingCutting、GallbladderDissection、GallbladderPackaging、CleaningCoagulation 和 GallbladderRetraction。
+- 器械标签包括 Grasper、Bipolar、Hook、Scissors、Clipper、Irrigator 和 SpecimenBag。
 - `picture/compare.jpg` 是已有实验记录图；提供本地数据和检查点后，可通过 `general_compare_diagram.py` 重新生成对比图。
+
+## 参考资料
+
+- [CAMMA-public/TF-Cholec80](https://github.com/CAMMA-public/TF-Cholec80)：Cholec80 官方数据准备入口和 TensorFlow 数据封装。
+- [Twinanda et al., EndoNet: A Deep Architecture for Recognition Tasks on Laparoscopic Videos](https://doi.org/10.1109/TMI.2016.2593957)：Cholec80 关联论文；可参考 [arXiv 版本](https://arxiv.org/abs/1602.03012)。
 
 ## 目录结构
 
