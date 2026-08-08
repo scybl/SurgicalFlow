@@ -55,7 +55,9 @@ def test_readme_has_cholec80_download_notes():
     assert "80 laparoscopic cholecystectomy videos" in english
     assert "13 位外科医生" in readme
     assert "13 surgeons" in english
-    assert "## 参考资料" in readme
-    assert "## References" in english
+    assert "## 数据来源" in readme
+    assert "## Data References" in english
+    assert "官方数据准备入口" in readme
+    assert "official Cholec80 data-preparation entry point" in english
     assert "10.1109/TMI.2016.2593957" in readme
     assert "10.1109/TMI.2016.2593957" in english

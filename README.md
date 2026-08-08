@@ -106,10 +106,10 @@ python train_taskB_out_head.py --name flat_tool --epochs 20 --data_root data/cho
 - 器械标签包括 Grasper、Bipolar、Hook、Scissors、Clipper、Irrigator 和 SpecimenBag。
 - `picture/compare.jpg` 是已有实验记录图；提供本地数据和检查点后，可通过 `general_compare_diagram.py` 重新生成对比图。
 
-## 参考资料
+## 数据来源
 
-- [CAMMA-public/TF-Cholec80](https://github.com/CAMMA-public/TF-Cholec80)：Cholec80 官方数据准备入口和 TensorFlow 数据封装。
-- [Twinanda et al., EndoNet: A Deep Architecture for Recognition Tasks on Laparoscopic Videos](https://doi.org/10.1109/TMI.2016.2593957)：Cholec80 关联论文；可参考 [arXiv 版本](https://arxiv.org/abs/1602.03012)。
+- [CAMMA-public/TF-Cholec80](https://github.com/CAMMA-public/TF-Cholec80)：Cholec80 官方数据准备入口，包含下载脚本、数据规模、阶段标签和器械标签说明。
+- [Twinanda et al., EndoNet: A Deep Architecture for Recognition Tasks on Laparoscopic Videos](https://doi.org/10.1109/TMI.2016.2593957)：Cholec80 数据集关联论文；官方说明要求使用 Cholec80 时引用该论文。
 
 ## 目录结构
 

@@ -106,10 +106,10 @@ python train_taskB_out_head.py --name flat_tool --epochs 20 --data_root data/cho
 - Tool labels include Grasper, Bipolar, Hook, Scissors, Clipper, Irrigator, and SpecimenBag.
 - `picture/compare.jpg` is a recorded experiment figure; with local data and checkpoints, regenerate it through `general_compare_diagram.py`.
 
-## References
+## Data References
 
-- [CAMMA-public/TF-Cholec80](https://github.com/CAMMA-public/TF-Cholec80): official Cholec80 data-preparation entry point and TensorFlow data wrapper.
-- [Twinanda et al., EndoNet: A Deep Architecture for Recognition Tasks on Laparoscopic Videos](https://doi.org/10.1109/TMI.2016.2593957): Cholec80-related paper; see also the [arXiv version](https://arxiv.org/abs/1602.03012).
+- [CAMMA-public/TF-Cholec80](https://github.com/CAMMA-public/TF-Cholec80): official Cholec80 data-preparation entry point, including the download script, dataset size, phase labels, and tool labels.
+- [Twinanda et al., EndoNet: A Deep Architecture for Recognition Tasks on Laparoscopic Videos](https://doi.org/10.1109/TMI.2016.2593957): Cholec80 dataset paper; the official data notes ask users to cite this paper when using Cholec80.
 
 ## Project Layout
 
