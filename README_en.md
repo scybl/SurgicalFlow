@@ -86,8 +86,10 @@ python train_taskB_out_head.py --name tool_head --epochs 20 --data_root data/cho
 ## Data Notes
 
 - The Cholec80 dataset is not included in this repository.
+- Official Cholec80 access point: [CAMMA-public/TF-Cholec80](https://github.com/CAMMA-public/TF-Cholec80); its preparation script downloads `https://s3.unistra.fr/camma_public/datasets/cholec80/cholec80.tar.gz`.
 - The default data path is `data/cholec80`.
-- Full training and evaluation require local `frames/`, `phase_annotations/`, and `tool_annotations/` directories.
+- The official notes recommend around 166 GB of free space before download; the extracted dataset is about 85.2 GB.
+- Full training and evaluation require `data/cholec80/frames/`, `data/cholec80/phase_annotations/`, and `data/cholec80/tool_annotations/`.
 - `picture/compare.jpg` is a recorded experiment figure; with local data and checkpoints, regenerate it through `general_compare_diagram.py`.
 
 ## Project Layout

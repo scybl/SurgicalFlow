@@ -34,3 +34,15 @@ def test_readme_uses_reproducible_results_and_real_assets():
     assert (ROOT / "picture" / "compare.jpg").is_file()
     assert (ROOT / "docs" / "results" / "project_summary.md").is_file()
     assert (ROOT / "docs" / "results" / "model_summary.csv").is_file()
+
+
+def test_readme_has_cholec80_download_notes():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    english = (ROOT / "README_en.md").read_text(encoding="utf-8")
+
+    assert "https://github.com/CAMMA-public/TF-Cholec80" in readme
+    assert "https://github.com/CAMMA-public/TF-Cholec80" in english
+    assert "cholec80.tar.gz" in readme
+    assert "cholec80.tar.gz" in english
+    assert "data/cholec80/frames/" in readme
+    assert "data/cholec80/frames/" in english

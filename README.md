@@ -86,8 +86,10 @@ python train_taskB_out_head.py --name tool_head --epochs 20 --data_root data/cho
 ## 数据说明
 
 - 仓库不包含 Cholec80 数据集。
+- Cholec80 官方获取入口：[CAMMA-public/TF-Cholec80](https://github.com/CAMMA-public/TF-Cholec80)；官方脚本下载归档为 `https://s3.unistra.fr/camma_public/datasets/cholec80/cholec80.tar.gz`。
 - 默认数据路径为 `data/cholec80`。
-- 完整训练和评估需要本地准备 `frames/`、`phase_annotations/` 和 `tool_annotations/`。
+- 官方说明中数据下载约需 166 GB 可用空间，解压后约 85.2 GB。
+- 完整训练和评估需要整理为 `data/cholec80/frames/`、`data/cholec80/phase_annotations/` 和 `data/cholec80/tool_annotations/`。
 - `picture/compare.jpg` 是已有实验记录图；提供本地数据和检查点后，可通过 `general_compare_diagram.py` 重新生成对比图。
 
 ## 目录结构
