@@ -15,4 +15,4 @@ test:
 	$(PYTEST) tests/ -q
 
 clean:
-	rm -rf .pytest_cache __pycache__ tests/__pycache__
+	rm -rf .pytest_cache __pycache__ tests/__pycache__ docs/results outputs

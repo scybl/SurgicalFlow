@@ -34,6 +34,11 @@ SurgicalFlow 是一个基于 PyTorch 的手术流程预测项目，面向腹腔�
 | `TaskA_CNN_LSTM` 参数量 | 949,769 |
 | `FutureTimelineModel` 参数量 | 19,591 |
 | `ToolPredictionModel` 参数量 | 17,799 |
+| 剩余时间预测 MAE，CNN Baseline | 3.29 分钟 |
+| 剩余时间预测 MAE，CNN-LSTM (N=32) | 3.34 分钟 |
+| 剩余时间预测 MAE，CNN-LSTM (N=16) | 3.38 分钟 |
+
+上面三行 MAE 数字取自 `picture/compare.jpg` 的图例（stable window 测试集对比），此前只画在图里、没写进这张结果表。
 
 结果文件：
 

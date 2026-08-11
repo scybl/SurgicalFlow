@@ -34,6 +34,11 @@ Raw videos are not distributed with this repository; lightweight checks and resu
 | `TaskA_CNN_LSTM` parameters | 949,769 |
 | `FutureTimelineModel` parameters | 19,591 |
 | `ToolPredictionModel` parameters | 17,799 |
+| Remaining-time MAE, CNN Baseline | 3.29 min |
+| Remaining-time MAE, CNN-LSTM (N=32) | 3.34 min |
+| Remaining-time MAE, CNN-LSTM (N=16) | 3.38 min |
+
+The three MAE figures above are read from the legend in `picture/compare.jpg` (stable-window test comparison); they previously appeared only in the plot and not in this results table.
 
 Result files:
 
